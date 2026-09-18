@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { 
-  Settings, UserCheck, Plus, Trash2, Save, ShieldCheck, Wallet, DollarSign 
+  Settings, UserCheck, Plus, Trash2, Save, ShieldCheck, Wallet, 
+  Lock, Database, Key, Folder, FileSpreadsheet, Link, Shield, Eye, EyeOff 
 } from 'lucide-react';
 import { subscribeSettings, saveSettingsToDatabase } from '../services/api';
 
@@ -10,17 +11,44 @@ export default function Pengaturan() {
     asosiasi: {
       namaAsosiasi: 'Asosiasi SDM PKH Tapin',
       nominalIuran: 35000,
-      targetTahunan: 300000
+      targetTahunan: 300000,
+      nominalMaksimalKlaim: 5000000,
+      jumlahMaksimalKlaimTahunan: 1
     },
-    bendaharaList: []
+    bendaharaList: [],
+    bendaharaLocks: {
+      pemasukan: '',
+      pengeluaran: '',
+      iuran: ''
+    },
+    systemKeys: {
+      driveFolderId: '',
+      spreadsheetId: '',
+      gasWebAppUrl: ''
+    },
+    security: {
+      adminPassword: '',
+      superAdminPassword: ''
+    }
   });
 
   const [newBendaharaName, setNewBendaharaName] = useState('');
+  const [showAdminPass, setShowAdminPass] = useState(false);
+  const [showSuperPass, setShowSuperPass] = useState(false);
+  const [savingSection, setSavingSection] = useState('');
 
   useEffect(() => {
     const unsub = subscribeSettings((data) => {
       if (data) {
-        setSettings(data);
+        setSettings(prev => ({
+          ...prev,
+          ...data,
+          asosiasi: { ...prev.asosiasi, ...(data.asosiasi || {}) },
+          bendaharaList: data.bendaharaList || prev.bendaharaList,
+          bendaharaLocks: { ...prev.bendaharaLocks, ...(data.bendaharaLocks || {}) },
+          systemKeys: { ...prev.systemKeys, ...(data.systemKeys || {}) },
+          security: { ...prev.security, ...(data.security || {}) }
+        }));
       }
     });
 
@@ -29,18 +57,25 @@ export default function Pengaturan() {
     };
   }, []);
 
-  const handleSaveAsosiasiSettings = async (e) => {
-    e.preventDefault();
-    await saveSettingsToDatabase(settings);
-    Swal.fire({
-      icon: 'success',
-      title: 'Pengaturan Disimpan!',
-      text: 'Parameter Asosiasi berhasil diperbarui.',
-      timer: 1500,
-      showConfirmButton: false
-    });
+  // Helper untuk menyimpan seluruh bagian settings ke database
+  const saveAllSettings = async (updatedSettings, sectionTitle = 'Pengaturan') => {
+    setSavingSection(sectionTitle);
+    try {
+      await saveSettingsToDatabase(updatedSettings);
+      Swal.fire({
+        icon: 'success',
+        title: `${sectionTitle} Disimpan!`,
+        text: 'Data konfigurasi berhasil diperbarui dan disinkronkan ke database.',
+        timer: 1600,
+        showConfirmButton: false
+      });
+    } catch (err) {
+      Swal.fire('Error', 'Gagal menyimpan pengaturan ke database.', 'error');
+    }
+    setSavingSection('');
   };
 
+  // Handler Simpan Bendahara Baru
   const handleAddBendahara = async (e) => {
     e.preventDefault();
     if (!newBendaharaName.trim()) return;
@@ -56,17 +91,10 @@ export default function Pengaturan() {
 
     setSettings(newSettings);
     setNewBendaharaName('');
-    await saveSettingsToDatabase(newSettings);
-
-    Swal.fire({
-      icon: 'success',
-      title: 'Bendahara Ditambahkan',
-      text: `Bendahara "${newBendahara.nama}" siap digunakan pada form transaksi.`,
-      timer: 1500,
-      showConfirmButton: false
-    });
+    await saveAllSettings(newSettings, 'Daftar Bendahara');
   };
 
+  // Handler Hapus Bendahara
   const handleDeleteBendahara = async (id, nama) => {
     const confirm = await Swal.fire({
       title: `Hapus ${nama}?`,
@@ -83,93 +111,187 @@ export default function Pengaturan() {
       const newSettings = { ...settings, bendaharaList: updatedList };
 
       setSettings(newSettings);
-      await saveSettingsToDatabase(newSettings);
-
-      Swal.fire('Terhapus', `Bendahara ${nama} telah dihapus dari opsi aktif.`, 'success');
+      await saveAllSettings(newSettings, 'Hapus Bendahara');
     }
   };
 
+  // Handler Simpan Lock Bendahara
+  const handleSaveBendaharaLocks = async (e) => {
+    e.preventDefault();
+    await saveAllSettings(settings, 'Kunci Bendahara Menu');
+  };
+
+  // Handler Simpan Parameter Asosiasi & Klaim
+  const handleSaveAsosiasiSettings = async (e) => {
+    e.preventDefault();
+    await saveAllSettings(settings, 'Parameter Asosiasi');
+  };
+
+  // Handler Simpan System & Integration Keys
+  const handleSaveSystemKeys = async (e) => {
+    e.preventDefault();
+    await saveAllSettings(settings, 'Kunci Integrasi System');
+  };
+
+  // Handler Simpan Keamanan Password
+  const handleSaveSecurity = async (e) => {
+    e.preventDefault();
+    await saveAllSettings(settings, 'Keamanan Password');
+  };
+
   return (
-    <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
+    <div className="space-y-6 animate-fade-in max-w-4xl mx-auto pb-10">
       {/* HEADER PAGE */}
       <div>
         <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
           <Settings className="w-7 h-7 text-green-700" />
-          Pengaturan Sistem & Bendahara
+          Pusat Pengaturan Sistem & Konfigurasi
         </h1>
-        <p className="text-gray-500 text-sm">Kelola daftar Bendahara aktif dan parameter iuran Asosiasi (Khusus Super Admin).</p>
+        <p className="text-gray-500 text-sm">Kelola seluruh parameter sistem, batas klaim, penguncian bendahara, hingga kunci API terpusat.</p>
       </div>
 
-      {/* SEKSI 1: MANAJEMEN BENDAHARA */}
-      <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-4">
+      {/* SEKSI 1: MANAJEMEN BENDAHARA & PENGUNCIAN PER-MENU */}
+      <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-6">
         <div className="flex justify-between items-center border-b pb-3">
           <h2 className="text-base font-black text-gray-800 flex items-center gap-2">
             <UserCheck className="w-5 h-5 text-green-700" />
-            Kelola Daftar Bendahara Aktif
+            Kelola Daftar Bendahara & Penguncian Menu
           </h2>
           <span className="text-xs bg-green-100 text-green-800 font-bold px-2.5 py-1 rounded-full">
             {settings.bendaharaList?.length || 0} Terdaftar
           </span>
         </div>
 
-        <p className="text-xs text-gray-500 font-medium">
-          Daftar ini akan muncul pada pilihan Bendahara saat pencatatan Pemasukan/Iuran. Riwayat transaksi terdahulu tetap terjaga lengkap walau nama bendahara dihapus dari daftar ini.
-        </p>
+        {/* SUB-SEKSI: TAMBAH BENDAHARA */}
+        <div className="space-y-3">
+          <label className="block text-xs font-bold text-gray-700">Tambah Bendahara Baru</label>
+          <form onSubmit={handleAddBendahara} className="flex gap-2">
+            <input
+              type="text"
+              required
+              placeholder="Masukkan Nama Bendahara Baru..."
+              value={newBendaharaName}
+              onChange={(e) => setNewBendaharaName(e.target.value)}
+              className="flex-1 p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-600 font-medium"
+            />
+            <button
+              type="submit"
+              className="bg-green-700 hover:bg-green-800 text-white px-5 py-3 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-green-700/20 transition"
+            >
+              <Plus className="w-4 h-4" /> Tambah
+            </button>
+          </form>
 
-        {/* FORM TAMBAH BENDAHARA */}
-        <form onSubmit={handleAddBendahara} className="flex gap-2">
-          <input
-            type="text"
-            required
-            placeholder="Masukkan Nama Bendahara Baru..."
-            value={newBendaharaName}
-            onChange={(e) => setNewBendaharaName(e.target.value)}
-            className="flex-1 p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-600 font-medium"
-          />
-          <button
-            type="submit"
-            className="bg-green-700 hover:bg-green-800 text-white px-5 py-3 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-green-700/20 transition"
-          >
-            <Plus className="w-4 h-4" /> Tambah
-          </button>
-        </form>
+          {/* LIST BENDAHARA AKTIF */}
+          <div className="divide-y divide-gray-100 pt-1">
+            {(!settings.bendaharaList || settings.bendaharaList.length === 0) ? (
+              <p className="text-center py-4 text-xs text-gray-400 font-medium">Belum ada bendahara terdaftar.</p>
+            ) : (
+              settings.bendaharaList.map((b) => (
+                <div key={b.id} className="py-2.5 flex justify-between items-center hover:bg-gray-50/80 px-2 rounded-xl transition">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-green-100 text-green-800 flex items-center justify-center font-black text-xs">
+                      {b.nama.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-extrabold text-gray-800 text-sm">{b.nama}</p>
+                      <p className="text-[10px] text-gray-400 font-semibold">Pengelola Kas & Iuran</p>
+                    </div>
+                  </div>
 
-        {/* LIST BENDAHARA AKTIF */}
-        <div className="divide-y divide-gray-100 pt-2">
-          {(!settings.bendaharaList || settings.bendaharaList.length === 0) ? (
-            <p className="text-center py-6 text-xs text-gray-400 font-medium">Belum ada bendahara terdaftar.</p>
-          ) : (
-            settings.bendaharaList.map((b) => (
-              <div key={b.id} className="py-3 flex justify-between items-center hover:bg-gray-50/80 px-2 rounded-xl transition">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-green-100 text-green-800 flex items-center justify-center font-black text-xs">
-                    {b.nama.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="font-extrabold text-gray-800 text-sm">{b.nama}</p>
-                    <p className="text-[10px] text-gray-400 font-semibold">Pengelola Kas & Iuran</p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteBendahara(b.id, b.nama)}
+                    className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition"
+                    title="Hapus Bendahara"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => handleDeleteBendahara(b.id, b.nama)}
-                  className="p-2 text-red-500 hover:bg-red-50 rounded-xl transition"
-                  title="Hapus Bendahara"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
+
+        {/* SUB-SEKSI: PENGUNCIAN BENDAHARA PER MENU */}
+        <form onSubmit={handleSaveBendaharaLocks} className="pt-4 border-t space-y-4">
+          <div className="flex items-center gap-2">
+            <Lock className="w-4 h-4 text-amber-600" />
+            <h3 className="text-xs font-black text-gray-800 uppercase tracking-wider">Kunci Bendahara Otomatis Per-Menu (Super Admin Lock)</h3>
+          </div>
+          <p className="text-xs text-gray-500">
+            Pilih bendahara khusus yang dikunci pada tiap menu. Pilihan ini akan mengunci dropdown bendahara pada form input pengguna biasa.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Kunci Pemasukan</label>
+              <select
+                value={settings.bendaharaLocks?.pemasukan || ''}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  bendaharaLocks: { ...settings.bendaharaLocks, pemasukan: e.target.value }
+                })}
+                className="w-full p-2.5 border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="">-- Bebas (Tidak Dikunci) --</option>
+                {settings.bendaharaList?.map((b) => (
+                  <option key={b.id} value={b.nama}>{b.nama}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Kunci Pengeluaran</label>
+              <select
+                value={settings.bendaharaLocks?.pengeluaran || ''}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  bendaharaLocks: { ...settings.bendaharaLocks, pengeluaran: e.target.value }
+                })}
+                className="w-full p-2.5 border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="">-- Bebas (Tidak Dikunci) --</option>
+                {settings.bendaharaList?.map((b) => (
+                  <option key={b.id} value={b.nama}>{b.nama}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Kunci Bayar Asosiasi</label>
+              <select
+                value={settings.bendaharaLocks?.iuran || ''}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  bendaharaLocks: { ...settings.bendaharaLocks, iuran: e.target.value }
+                })}
+                className="w-full p-2.5 border rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-amber-500"
+              >
+                <option value="">-- Bebas (Tidak Dikunci) --</option>
+                {settings.bendaharaList?.map((b) => (
+                  <option key={b.id} value={b.nama}>{b.nama}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-amber-600/20 transition"
+            >
+              <Save className="w-4 h-4" /> Simpan Penguncian Bendahara
+            </button>
+          </div>
+        </form>
       </div>
 
-      {/* SEKSI 2: PARAMETER ASOSIASI */}
+      {/* SEKSI 2: PARAMETER ASOSIASI & BATAS KLAIM TAHUNAN */}
       <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-4">
         <h2 className="text-base font-black text-gray-800 flex items-center gap-2 border-b pb-3">
           <Wallet className="w-5 h-5 text-green-700" />
-          Parameter Nominal Asosiasi
+          Parameter Nominal & Limit Batas Klaim Asosiasi
         </h2>
 
         <form onSubmit={handleSaveAsosiasiSettings} className="space-y-4">
@@ -189,6 +311,20 @@ export default function Pengaturan() {
             </div>
 
             <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Nominal Iuran Bulanan (Rp)</label>
+              <input
+                type="number"
+                required
+                value={settings.asosiasi?.nominalIuran || 35000}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  asosiasi: { ...settings.asosiasi, nominalIuran: Number(e.target.value) }
+                })}
+                className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-600 font-extrabold text-amber-600"
+              />
+            </div>
+
+            <div>
               <label className="block text-xs font-bold text-gray-600 mb-1">Target Iuran Setahun (Rp)</label>
               <input
                 type="number"
@@ -201,6 +337,43 @@ export default function Pengaturan() {
                 className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-600 font-black text-green-700"
               />
             </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Nominal Maksimal Klaim Pencairan (Rp)</label>
+              <input
+                type="number"
+                required
+                value={settings.asosiasi?.nominalMaksimalKlaim || 5000000}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  asosiasi: { ...settings.asosiasi, nominalMaksimalKlaim: Number(e.target.value) }
+                })}
+                className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-600 font-black text-purple-700"
+              />
+            </div>
+
+            <div className="sm:col-span-2 bg-purple-50 p-4 rounded-2xl border border-purple-100">
+              <label className="block text-xs font-bold text-purple-900 mb-1">
+                Batas Frekuensi Penerimaan Klaim per SDM (Jumlah Kali / Tahun)
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  required
+                  value={settings.asosiasi?.jumlahMaksimalKlaimTahunan ?? 1}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    asosiasi: { ...settings.asosiasi, jumlahMaksimalKlaimTahunan: Number(e.target.value) }
+                  })}
+                  className="w-28 p-2.5 border rounded-xl text-center text-lg font-black text-purple-800 bg-white outline-none focus:ring-2 focus:ring-purple-600"
+                />
+                <p className="text-xs text-purple-700 font-semibold">
+                  Kali pencairan per sumber dana (Kabupaten / Provinsi) dalam 1 periode tahun anggaran.
+                </p>
+              </div>
+            </div>
           </div>
 
           <div className="pt-2 flex justify-end">
@@ -208,7 +381,146 @@ export default function Pengaturan() {
               type="submit"
               className="bg-green-700 hover:bg-green-800 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md shadow-green-700/20 transition"
             >
-              <Save className="w-4 h-4" /> Simpan Perubahan Parameter
+              <Save className="w-4 h-4" /> Simpan Parameter Asosiasi
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* SEKSI 3: INTEGRASI KUNCI SISTEM (GOOGLE DRIVE, SPREADSHEET, GAS URL) */}
+      <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-4">
+        <h2 className="text-base font-black text-gray-800 flex items-center gap-2 border-b pb-3">
+          <Database className="w-5 h-5 text-blue-600" />
+          Integrasi Database & Server (Drive, Spreadsheet, GAS)
+        </h2>
+        <p className="text-xs text-gray-500">
+          Atur ID koneksi Google Drive, Spreadsheet, dan URL Web App Google Apps Script secara terpusat tanpa perlu mengubah kode sumber.
+        </p>
+
+        <form onSubmit={handleSaveSystemKeys} className="space-y-4">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 flex items-center gap-1.5">
+                <Folder className="w-3.5 h-3.5 text-amber-500" /> ID Google Drive Folder (Penyimpanan Berkas)
+              </label>
+              <input
+                type="text"
+                placeholder="Masukkan Folder ID Google Drive..."
+                value={settings.systemKeys?.driveFolderId || ''}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  systemKeys: { ...settings.systemKeys, driveFolderId: e.target.value }
+                })}
+                className="w-full p-3 border rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 flex items-center gap-1.5">
+                <FileSpreadsheet className="w-3.5 h-3.5 text-green-600" /> ID Google Spreadsheet (Database & Backup Sheet)
+              </label>
+              <input
+                type="text"
+                placeholder="Masukkan Spreadsheet ID..."
+                value={settings.systemKeys?.spreadsheetId || ''}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  systemKeys: { ...settings.systemKeys, spreadsheetId: e.target.value }
+                })}
+                className="w-full p-3 border rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1 flex items-center gap-1.5">
+                <Link className="w-3.5 h-3.5 text-blue-500" /> URL Web App Google Apps Script (GAS)
+              </label>
+              <input
+                type="url"
+                placeholder="https://script.google.com/macros/s/.../exec"
+                value={settings.systemKeys?.gasWebAppUrl || ''}
+                onChange={(e) => setSettings({
+                  ...settings,
+                  systemKeys: { ...settings.systemKeys, gasWebAppUrl: e.target.value }
+                })}
+                className="w-full p-3 border rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
+          </div>
+
+          <div className="pt-2 flex justify-end">
+            <button
+              type="submit"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md shadow-blue-600/20 transition"
+            >
+              <Save className="w-4 h-4" /> Simpan Integrasi Server
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* SEKSI 4: KEAMANAN & MANAJEMEN PASSWORD AKSES ADMIN */}
+      <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-4">
+        <h2 className="text-base font-black text-gray-800 flex items-center gap-2 border-b pb-3">
+          <ShieldCheck className="w-5 h-5 text-red-600" />
+          Pengaturan Keamanan Password & Role Akses
+        </h2>
+
+        <form onSubmit={handleSaveSecurity} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Password Akses Admin biasa</label>
+              <div className="relative">
+                <input
+                  type={showAdminPass ? "text" : "password"}
+                  placeholder="Password Admin..."
+                  value={settings.security?.adminPassword || ''}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    security: { ...settings.security, adminPassword: e.target.value }
+                  })}
+                  className="w-full p-3 pr-10 border rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAdminPass(!showAdminPass)}
+                  className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600"
+                >
+                  {showAdminPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Password Akses Super Admin</label>
+              <div className="relative">
+                <input
+                  type={showSuperPass ? "text" : "password"}
+                  placeholder="Password Super Admin..."
+                  value={settings.security?.superAdminPassword || ''}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    security: { ...settings.security, superAdminPassword: e.target.value }
+                  })}
+                  className="w-full p-3 pr-10 border rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSuperPass(!showSuperPass)}
+                  className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600"
+                >
+                  {showSuperPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2 flex justify-end">
+            <button
+              type="submit"
+              className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md shadow-red-600/20 transition"
+            >
+              <Shield className="w-4 h-4" /> Simpan Password Keamanan
             </button>
           </div>
         </form>
