@@ -10,7 +10,6 @@ const DEFAULT_BENDAHARA_LIST = [
   { id: 3, nama: "Dina Riris Yanti", status: "Aktif" }
 ];
 
-// Helper Format Tanggal Baku Indonesia: dd mmmm yyyy
 export const formatDateIndo = (dateInput) => {
   if (!dateInput || dateInput === '-') return '-';
   let d = new Date(dateInput);
@@ -43,7 +42,7 @@ export const parseTimestamp = (dateVal) => {
   return 0;
 };
 
-// 1. SUBSCRIBE SETTINGS / PENGATURAN
+// 1. SUBSCRIBE SETTINGS
 export const subscribeSettings = (callback) => {
   return listenFirebase("pengaturan_cache", (data) => {
     if (data) {
@@ -80,7 +79,7 @@ export const saveSettingsToDatabase = async (newSettings) => {
   return { success: true };
 };
 
-// 2. MIGRASI SPREADSHEET KE FIREBASE (MURNI DATA SPREADSHEET/UPLOAD)
+// 2. MIGRASI SPREADSHEET KE FIREBASE
 export const migrateSpreadsheetToFirebase = async () => {
   try {
     const config = (await getFromFirebase("pengaturan_cache"))?.system;
@@ -126,7 +125,7 @@ export const migrateSpreadsheetToFirebase = async () => {
 
 let hasInitialSynced = false;
 
-// 3. GET & SUBSCRIBE DASHBOARD DATA
+// 3. SUBSCRIBE DASHBOARD DATA
 export const getFastDashboardData = async (onUpdate) => {
   const cached = await getFromFirebase("dashboard_cache");
   if (cached && onUpdate) onUpdate(cached);
@@ -148,7 +147,7 @@ export const subscribeDashboardData = (callback) => {
   });
 };
 
-// 4. GET & SUBSCRIBE PEGAWAI / SDM
+// 4. SUBSCRIBE SDM / PEGAWAI DATA
 export const getFastPegawaiSDM = async (onUpdate) => {
   const cached = await getFromFirebase("sdm_cache");
   if (cached && onUpdate) onUpdate(cached);
@@ -159,9 +158,10 @@ export const getFastPegawai = getFastPegawaiSDM;
 
 export const subscribeSDMData = (callback) => {
   return listenFirebase("sdm_cache", (data) => {
-    if (Array.isArray(data)) {
+    if (Array.isArray(data) && data.length > 0) {
       callback(data);
     } else {
+      migrateSpreadsheetToFirebase();
       callback([]);
     }
   });
@@ -176,9 +176,10 @@ export const getFastRekapAsosiasi = async (onUpdate) => {
 
 export const subscribeRekapAsosiasi = (callback) => {
   return listenFirebase("rekap_pencairan_cache", (data) => {
-    if (Array.isArray(data)) {
+    if (Array.isArray(data) && data.length > 0) {
       callback(data);
     } else {
+      migrateSpreadsheetToFirebase();
       callback([]);
     }
   });
