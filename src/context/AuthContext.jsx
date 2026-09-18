@@ -4,25 +4,25 @@ import { useNavigate } from 'react-router-dom';
 const AuthContext = createContext({});
 
 export const AuthProvider = ({ children }) => {
-  // Default login sebagai User Biasa
-  const [user, setUser] = useState({ name: 'User' });
+  const [user, setUser] = useState({ name: 'User', role: 'user' });
   const [role, setRole] = useState('user'); 
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const loginAsUser = () => {
-    setUser({ name: 'User' });
+    setUser({ name: 'User', role: 'user' });
     setRole('user');
     navigate('/dashboard');
   };
 
   const loginAsAdmin = (password) => {
     if (password === 'SAdmin321') {
-      setUser({ name: 'Super Admin' });
+      setUser({ name: 'Super Admin', role: 'superadmin' });
       setRole('superadmin');
       navigate('/dashboard');
       return { success: true };
     } else if (password === 'Admin321') {
-      setUser({ name: 'Administrator' });
+      setUser({ name: 'Administrator', role: 'admin' });
       setRole('admin');
       navigate('/dashboard');
       return { success: true };
@@ -31,7 +31,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    setUser({ name: 'User' });
+    setUser({ name: 'User', role: 'user' });
     setRole('user');
     navigate('/dashboard');
   };
@@ -46,6 +46,7 @@ export const AuthProvider = ({ children }) => {
     <AuthContext.Provider value={{ 
       user, 
       role, 
+      loading,
       loginAsUser, 
       loginAsAdmin, 
       loginAdmin, 
