@@ -213,7 +213,25 @@ export const saveSDMToDatabase = async (newList) => {
   }).catch(console.error);
 };
 
-// 6. API FETCH & MUTASI TRANSAKSI
+// 6. SINKRONISASI REAL-TIME MUTASI KE GOOGLE SPREADSHEET
+export const syncMutationToSpreadsheet = async (action, payloadData) => {
+  try {
+    const sysConfig = (await getFromFirebase("pengaturan_cache"))?.system;
+    const apiUrl = sysConfig?.webAppUrl || DEFAULT_API_URL;
+
+    if (!apiUrl) return;
+
+    await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, payload: payloadData }),
+    });
+  } catch (err) {
+    console.error(`Gagal sync ke Spreadsheet [${action}]:`, err);
+  }
+};
+
+// 7. API FETCH & MUTASI TRANSAKSI
 export const fetchAPI = async (action, payload = null) => {
   try {
     const sysConfig = (await getFromFirebase("pengaturan_cache"))?.system;
