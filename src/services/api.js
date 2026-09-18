@@ -1,6 +1,5 @@
 import { saveToFirebase, getFromFirebase, listenFirebase } from './firebase';
 
-// Re-export semua helper Firebase dari satu pintu
 export { listenFirebase, saveToFirebase, getFromFirebase };
 
 const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbyHqzptFyuY8httU97-HHdI6B-x_s283AOZnYaKxQjqwUdPHp1TUjAAaNR2SyQOMNoq/exec";
@@ -9,10 +8,6 @@ const DEFAULT_BENDAHARA_LIST = [
   { id: 1, nama: "Herni", status: "Aktif" },
   { id: 2, nama: "Sari", status: "Aktif" },
   { id: 3, nama: "Dina Riris Yanti", status: "Aktif" }
-];
-
-const DEFAULT_SDM_NAMES = [
-  "Ahmad Fauzi", "Siti Nurhaliza", "Budi Santoso", "Dewi Lestari", "Eko Prasetyo"
 ];
 
 // Helper Format Tanggal Baku Indonesia: dd mmmm yyyy
@@ -85,7 +80,7 @@ export const saveSettingsToDatabase = async (newSettings) => {
   return { success: true };
 };
 
-// 2. MIGRASI SPREADSHEET KE FIREBASE
+// 2. MIGRASI SPREADSHEET KE FIREBASE (MURNI DATA SPREADSHEET/UPLOAD)
 export const migrateSpreadsheetToFirebase = async () => {
   try {
     const config = (await getFromFirebase("pengaturan_cache"))?.system;
@@ -105,27 +100,15 @@ export const migrateSpreadsheetToFirebase = async () => {
     if (Array.isArray(pegawaiRes) && pegawaiRes.length > 0) {
       cleanSDMList = pegawaiRes.map((p, idx) => {
         const rawName = typeof p === 'object' ? (p.nama || p[0]) : p;
-        const isNumeric = !rawName || !isNaN(Number(rawName)) || String(rawName).trim() === "300000";
         return {
           id: idx + 1,
           nik: p.nik || `${1000 + idx}`,
-          nama: isNumeric ? DEFAULT_SDM_NAMES[idx % DEFAULT_SDM_NAMES.length] : String(rawName),
-          jabatan: p.jabatan || `Pendamping Sosial`,
-          kecamatan: p.kecamatan || `-`,
-          status: `Aktif`
+          nama: rawName ? String(rawName).trim() : '-',
+          jabatan: p.jabatan || 'Pendamping Sosial',
+          kecamatan: p.kecamatan || '-',
+          status: p.status || 'Aktif'
         };
       });
-    }
-
-    if (cleanSDMList.length === 0) {
-      cleanSDMList = DEFAULT_SDM_NAMES.map((name, idx) => ({
-        id: idx + 1,
-        nik: `${1000 + idx}`,
-        nama: name,
-        jabatan: "Pendamping Sosial",
-        kecamatan: "Kab. Tapin",
-        status: "Aktif"
-      }));
     }
 
     await saveToFirebase("sdm_cache", cleanSDMList);
@@ -176,15 +159,10 @@ export const getFastPegawai = getFastPegawaiSDM;
 
 export const subscribeSDMData = (callback) => {
   return listenFirebase("sdm_cache", (data) => {
-    if (Array.isArray(data) && data.length > 0) {
-      const isCorrupted = data.some(item => !item.nama || !isNaN(Number(item.nama)) || item.nama === "300000");
-      if (isCorrupted) {
-        migrateSpreadsheetToFirebase();
-      } else {
-        callback(data);
-      }
+    if (Array.isArray(data)) {
+      callback(data);
     } else {
-      migrateSpreadsheetToFirebase();
+      callback([]);
     }
   });
 };
@@ -234,7 +212,7 @@ export const saveSDMToDatabase = async (newList) => {
   }).catch(console.error);
 };
 
-// 6. API FETCH & MUTASI TRANSAKSI LOKAL
+// 6. API FETCH & MUTASI TRANSAKSI
 export const fetchAPI = async (action, payload = null) => {
   try {
     const sysConfig = (await getFromFirebase("pengaturan_cache"))?.system;
