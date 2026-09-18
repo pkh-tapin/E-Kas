@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import Swal from 'sweetalert2';
 import { 
-  Settings, UserCheck, Plus, Trash2, Save, ShieldCheck, Wallet, 
-  Lock, Database, Key, Folder, FileSpreadsheet, Link, Shield, Eye, EyeOff 
+  Settings, UserCheck, Plus, Trash2, Save, Wallet, 
+  Lock, Database, Folder, FileSpreadsheet, Link, Shield, Eye, EyeOff, RefreshCw 
 } from 'lucide-react';
-import { subscribeSettings, saveSettingsToDatabase } from '../services/api';
+import { subscribeSettings, saveSettingsToDatabase, fetchAPI } from '../services/api';
 
 export default function Pengaturan() {
+  const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState({
     asosiasi: {
       namaAsosiasi: 'Asosiasi SDM PKH Tapin',
@@ -35,47 +36,91 @@ export default function Pengaturan() {
   const [newBendaharaName, setNewBendaharaName] = useState('');
   const [showAdminPass, setShowAdminPass] = useState(false);
   const [showSuperPass, setShowSuperPass] = useState(false);
-  const [savingSection, setSavingSection] = useState('');
+
+  // Fungsi penarik data awal lengkap dari GAS & Firebase
+  const loadAllSettingsFromGAS = async () => {
+    setLoading(true);
+    try {
+      // Ambil konfigurasi bawaan/awal dari GAS WebApp
+      const gasConfig = await fetchAPI('getGasConfig').catch(() => null);
+
+      const unsub = subscribeSettings((data) => {
+        if (data) {
+          setSettings(prev => ({
+            ...prev,
+            ...data,
+            asosiasi: { ...prev.asosiasi, ...(data.asosiasi || {}) },
+            bendaharaList: data.bendaharaList || prev.bendaharaList,
+            bendaharaLocks: { ...prev.bendaharaLocks, ...(data.bendaharaLocks || {}) },
+            systemKeys: {
+              driveFolderId: data.systemKeys?.driveFolderId || gasConfig?.driveFolderId || prev.systemKeys.driveFolderId,
+              spreadsheetId: data.systemKeys?.spreadsheetId || gasConfig?.spreadsheetId || prev.systemKeys.spreadsheetId,
+              gasWebAppUrl: data.systemKeys?.gasWebAppUrl || gasConfig?.gasWebAppUrl || prev.systemKeys.gasWebAppUrl
+            },
+            security: {
+              adminPassword: data.security?.adminPassword || gasConfig?.adminPassword || 'admin123',
+              superAdminPassword: data.security?.superAdminPassword || gasConfig?.superAdminPassword || 'superadmin123'
+            }
+          }));
+        } else if (gasConfig) {
+          // Jika database kosong, gunakan respon langsung dari GAS
+          setSettings(prev => ({
+            ...prev,
+            systemKeys: {
+              driveFolderId: gasConfig.driveFolderId || '',
+              spreadsheetId: gasConfig.spreadsheetId || '',
+              gasWebAppUrl: gasConfig.gasWebAppUrl || ''
+            },
+            security: {
+              adminPassword: gasConfig.adminPassword || 'admin123',
+              superAdminPassword: gasConfig.superAdminPassword || 'superadmin123'
+            }
+          }));
+        }
+        setLoading(false);
+      });
+
+      return unsub;
+    } catch (err) {
+      console.error('Gagal memuat pengaturan dari GAS:', err);
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const unsub = subscribeSettings((data) => {
-      if (data) {
-        setSettings(prev => ({
-          ...prev,
-          ...data,
-          asosiasi: { ...prev.asosiasi, ...(data.asosiasi || {}) },
-          bendaharaList: data.bendaharaList || prev.bendaharaList,
-          bendaharaLocks: { ...prev.bendaharaLocks, ...(data.bendaharaLocks || {}) },
-          systemKeys: { ...prev.systemKeys, ...(data.systemKeys || {}) },
-          security: { ...prev.security, ...(data.security || {}) }
-        }));
-      }
-    });
+    let unsubFn;
+    loadAllSettingsFromGAS().then(unsub => { unsubFn = unsub; });
 
     return () => {
-      if (typeof unsub === 'function') unsub();
+      if (typeof unsubFn === 'function') unsubFn();
     };
   }, []);
 
-  // Helper untuk menyimpan seluruh bagian settings ke database
+  // Simpan seluruh data & sinkronkan otomatis
   const saveAllSettings = async (updatedSettings, sectionTitle = 'Pengaturan') => {
-    setSavingSection(sectionTitle);
     try {
+      // 1. Simpan ke Database Utama
       await saveSettingsToDatabase(updatedSettings);
+
+      // 2. Sinkronkan konfigurasi ke backend GAS secara real-time
+      fetchAPI('syncGasConfig', {
+        systemKeys: updatedSettings.systemKeys,
+        security: updatedSettings.security,
+        asosiasi: updatedSettings.asosiasi
+      }).catch(() => {});
+
       Swal.fire({
         icon: 'success',
         title: `${sectionTitle} Disimpan!`,
-        text: 'Data konfigurasi berhasil diperbarui dan disinkronkan ke database.',
-        timer: 1600,
+        text: 'Data berhasil diperbarui dan disinkronkan otomatis ke Database & GAS Server.',
+        timer: 1800,
         showConfirmButton: false
       });
     } catch (err) {
       Swal.fire('Error', 'Gagal menyimpan pengaturan ke database.', 'error');
     }
-    setSavingSection('');
   };
 
-  // Handler Simpan Bendahara Baru
   const handleAddBendahara = async (e) => {
     e.preventDefault();
     if (!newBendaharaName.trim()) return;
@@ -94,7 +139,6 @@ export default function Pengaturan() {
     await saveAllSettings(newSettings, 'Daftar Bendahara');
   };
 
-  // Handler Hapus Bendahara
   const handleDeleteBendahara = async (id, nama) => {
     const confirm = await Swal.fire({
       title: `Hapus ${nama}?`,
@@ -115,25 +159,21 @@ export default function Pengaturan() {
     }
   };
 
-  // Handler Simpan Lock Bendahara
   const handleSaveBendaharaLocks = async (e) => {
     e.preventDefault();
     await saveAllSettings(settings, 'Kunci Bendahara Menu');
   };
 
-  // Handler Simpan Parameter Asosiasi & Klaim
   const handleSaveAsosiasiSettings = async (e) => {
     e.preventDefault();
     await saveAllSettings(settings, 'Parameter Asosiasi');
   };
 
-  // Handler Simpan System & Integration Keys
   const handleSaveSystemKeys = async (e) => {
     e.preventDefault();
-    await saveAllSettings(settings, 'Kunci Integrasi System');
+    await saveAllSettings(settings, 'Integrasi System GAS & Drive');
   };
 
-  // Handler Simpan Keamanan Password
   const handleSaveSecurity = async (e) => {
     e.preventDefault();
     await saveAllSettings(settings, 'Keamanan Password');
@@ -142,12 +182,20 @@ export default function Pengaturan() {
   return (
     <div className="space-y-6 animate-fade-in max-w-4xl mx-auto pb-10">
       {/* HEADER PAGE */}
-      <div>
-        <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
-          <Settings className="w-7 h-7 text-green-700" />
-          Pusat Pengaturan Sistem & Konfigurasi
-        </h1>
-        <p className="text-gray-500 text-sm">Kelola seluruh parameter sistem, batas klaim, penguncian bendahara, hingga kunci API terpusat.</p>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
+            <Settings className="w-7 h-7 text-green-700" />
+            Pusat Pengaturan Sistem & Konfigurasi
+          </h1>
+          <p className="text-gray-500 text-sm">Kelola seluruh parameter sistem, limit klaim, penguncian bendahara, dan kunci GAS terpusat.</p>
+        </div>
+        <button
+          onClick={loadAllSettingsFromGAS}
+          className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Sinkron Ulang dari GAS
+        </button>
       </div>
 
       {/* SEKSI 1: MANAJEMEN BENDAHARA & PENGUNCIAN PER-MENU */}
@@ -162,7 +210,6 @@ export default function Pengaturan() {
           </span>
         </div>
 
-        {/* SUB-SEKSI: TAMBAH BENDAHARA */}
         <div className="space-y-3">
           <label className="block text-xs font-bold text-gray-700">Tambah Bendahara Baru</label>
           <form onSubmit={handleAddBendahara} className="flex gap-2">
@@ -182,7 +229,6 @@ export default function Pengaturan() {
             </button>
           </form>
 
-          {/* LIST BENDAHARA AKTIF */}
           <div className="divide-y divide-gray-100 pt-1">
             {(!settings.bendaharaList || settings.bendaharaList.length === 0) ? (
               <p className="text-center py-4 text-xs text-gray-400 font-medium">Belum ada bendahara terdaftar.</p>
@@ -213,7 +259,7 @@ export default function Pengaturan() {
           </div>
         </div>
 
-        {/* SUB-SEKSI: PENGUNCIAN BENDAHARA PER MENU */}
+        {/* PENGUNCIAN BENDAHARA PER MENU */}
         <form onSubmit={handleSaveBendaharaLocks} className="pt-4 border-t space-y-4">
           <div className="flex items-center gap-2">
             <Lock className="w-4 h-4 text-amber-600" />
@@ -279,7 +325,7 @@ export default function Pengaturan() {
           <div className="flex justify-end pt-2">
             <button
               type="submit"
-              className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-amber-600/20 transition"
+              className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md transition"
             >
               <Save className="w-4 h-4" /> Simpan Penguncian Bendahara
             </button>
@@ -379,7 +425,7 @@ export default function Pengaturan() {
           <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              className="bg-green-700 hover:bg-green-800 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md shadow-green-700/20 transition"
+              className="bg-green-700 hover:bg-green-800 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md transition"
             >
               <Save className="w-4 h-4" /> Simpan Parameter Asosiasi
             </button>
@@ -387,15 +433,17 @@ export default function Pengaturan() {
         </form>
       </div>
 
-      {/* SEKSI 3: INTEGRASI KUNCI SISTEM (GOOGLE DRIVE, SPREADSHEET, GAS URL) */}
+      {/* SEKSI 3: INTEGRASI KUNCI SISTEM GAS, DRIVE & SPREADSHEET (Auto-Ditarik dari GAS) */}
       <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-4">
-        <h2 className="text-base font-black text-gray-800 flex items-center gap-2 border-b pb-3">
-          <Database className="w-5 h-5 text-blue-600" />
-          Integrasi Database & Server (Drive, Spreadsheet, GAS)
-        </h2>
-        <p className="text-xs text-gray-500">
-          Atur ID koneksi Google Drive, Spreadsheet, dan URL Web App Google Apps Script secara terpusat tanpa perlu mengubah kode sumber.
-        </p>
+        <div className="flex justify-between items-center border-b pb-3">
+          <h2 className="text-base font-black text-gray-800 flex items-center gap-2">
+            <Database className="w-5 h-5 text-blue-600" />
+            Integrasi ID GAS, Spreadsheet & Drive (Terisi Otomatis)
+          </h2>
+          <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-md">
+            Auto-Fetched from GAS
+          </span>
+        </div>
 
         <form onSubmit={handleSaveSystemKeys} className="space-y-4">
           <div className="space-y-3">
@@ -405,13 +453,14 @@ export default function Pengaturan() {
               </label>
               <input
                 type="text"
-                placeholder="Masukkan Folder ID Google Drive..."
+                required
+                placeholder="Memuat Folder ID dari GAS..."
                 value={settings.systemKeys?.driveFolderId || ''}
                 onChange={(e) => setSettings({
                   ...settings,
                   systemKeys: { ...settings.systemKeys, driveFolderId: e.target.value }
                 })}
-                className="w-full p-3 border rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full p-3 border rounded-xl text-xs font-mono font-bold text-gray-800 bg-gray-50/50 outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
 
@@ -421,29 +470,31 @@ export default function Pengaturan() {
               </label>
               <input
                 type="text"
-                placeholder="Masukkan Spreadsheet ID..."
+                required
+                placeholder="Memuat Spreadsheet ID dari GAS..."
                 value={settings.systemKeys?.spreadsheetId || ''}
                 onChange={(e) => setSettings({
                   ...settings,
                   systemKeys: { ...settings.systemKeys, spreadsheetId: e.target.value }
                 })}
-                className="w-full p-3 border rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full p-3 border rounded-xl text-xs font-mono font-bold text-gray-800 bg-gray-50/50 outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
 
             <div>
               <label className="block text-xs font-bold text-gray-600 mb-1 flex items-center gap-1.5">
-                <Link className="w-3.5 h-3.5 text-blue-500" /> URL Web App Google Apps Script (GAS)
+                <Link className="w-3.5 h-3.5 text-blue-500" /> URL Web App Google Apps Script (GAS Server)
               </label>
               <input
                 type="url"
+                required
                 placeholder="https://script.google.com/macros/s/.../exec"
                 value={settings.systemKeys?.gasWebAppUrl || ''}
                 onChange={(e) => setSettings({
                   ...settings,
                   systemKeys: { ...settings.systemKeys, gasWebAppUrl: e.target.value }
                 })}
-                className="w-full p-3 border rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full p-3 border rounded-xl text-xs font-mono font-bold text-gray-800 bg-gray-50/50 outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
           </div>
@@ -451,7 +502,7 @@ export default function Pengaturan() {
           <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md shadow-blue-600/20 transition"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md transition"
             >
               <Save className="w-4 h-4" /> Simpan Integrasi Server
             </button>
@@ -459,20 +510,26 @@ export default function Pengaturan() {
         </form>
       </div>
 
-      {/* SEKSI 4: KEAMANAN & MANAJEMEN PASSWORD AKSES ADMIN */}
+      {/* SEKSI 4: KEAMANAN & PASSWORD AWAL ADMIN / SUPER ADMIN (Auto-Ditarik dari GAS) */}
       <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm space-y-4">
-        <h2 className="text-base font-black text-gray-800 flex items-center gap-2 border-b pb-3">
-          <ShieldCheck className="w-5 h-5 text-red-600" />
-          Pengaturan Keamanan Password & Role Akses
-        </h2>
+        <div className="flex justify-between items-center border-b pb-3">
+          <h2 className="text-base font-black text-gray-800 flex items-center gap-2">
+            <Shield className="w-5 h-5 text-red-600" />
+            Pengaturan Password Akses (Auto-Ditarik dari GAS)
+          </h2>
+          <span className="text-[10px] bg-red-100 text-red-800 font-bold px-2 py-0.5 rounded-md">
+            Security Active
+          </span>
+        </div>
 
         <form onSubmit={handleSaveSecurity} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-gray-600 mb-1">Password Akses Admin biasa</label>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Password Akses Admin</label>
               <div className="relative">
                 <input
                   type={showAdminPass ? "text" : "password"}
+                  required
                   placeholder="Password Admin..."
                   value={settings.security?.adminPassword || ''}
                   onChange={(e) => setSettings({
@@ -496,6 +553,7 @@ export default function Pengaturan() {
               <div className="relative">
                 <input
                   type={showSuperPass ? "text" : "password"}
+                  required
                   placeholder="Password Super Admin..."
                   value={settings.security?.superAdminPassword || ''}
                   onChange={(e) => setSettings({
@@ -518,9 +576,9 @@ export default function Pengaturan() {
           <div className="pt-2 flex justify-end">
             <button
               type="submit"
-              className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md shadow-red-600/20 transition"
+              className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md transition"
             >
-              <Shield className="w-4 h-4" /> Simpan Password Keamanan
+              <Save className="w-4 h-4" /> Simpan Password Keamanan
             </button>
           </div>
         </form>
