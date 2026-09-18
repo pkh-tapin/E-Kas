@@ -16,6 +16,13 @@ import {
   parseTimestamp 
 } from '../services/api';
 
+// Daftar Default Nama SDM (mencegah crash saat cache/API masih kosong)
+const DEFAULT_SDM_NAMES = [
+  "ANA NURUL HIDAYAH", "ANNA LESTARI", "ANNIDA OLFINA", "FAUZI RAHMAN",
+  "IDA YANTI", "IKA RUMAINI AWALIA", "M ZAEN SYACHRULLAH", "MUHAMMAD SYAIFUDDIN",
+  "NOOR HAYATI", "RIRIN INDARWATI", "WITA LUSMANDARI", "YENI SUSILAWARTI",
+  "ERNI RAHMANIDA", "DINA RIRIS", "HERNI FITRIYAN"
+];
 
 export default function Asosiasi() {
   const { role } = useAuth();
