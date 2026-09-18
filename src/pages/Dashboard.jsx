@@ -186,7 +186,7 @@ export default function Dashboard() {
         <div className="bg-amber-100/60 border border-amber-200 rounded-2xl p-4 space-y-2">
           <p className="text-xs font-black text-amber-900 flex items-center gap-1.5 uppercase tracking-wide">
             <Info className="w-4 h-4 text-amber-800 flex-shrink-0" />
-            Pembayaran Asosiasi Ditolak / Ditransfer Ke:
+            Pembayaran Asosiasi Ditransfer Ke:
           </p>
           <p className="text-xs font-extrabold text-amber-950">Atas Nama : <span className="text-green-800">ERMA FEBRIYANTI</span></p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1 text-xs font-bold text-gray-800">
@@ -215,7 +215,7 @@ export default function Dashboard() {
           <ul className="list-disc pl-5 space-y-1.5 text-gray-700">
             <li><strong>Konfirmasi Iuran:</strong> Iuran Asosiasi dikonfirmasi menggunakan bukti transfer dan informasi jumlah SDM yang dibayarkan beserta bulan pembayaran.</li>
             <li><strong>Pengajuan Dana Suka Duka:</strong> Mengirimkan list nama SDM yang akan diklaim beserta keterangan/info kondisi secara lengkap.</li>
-            <li><strong>Dana Solidaritas:</strong> Rp 50.000 / SDM / Tahun akan ditagihkan setiap bulan <strong>JULI</strong>.</li>
+            <li><strong>Dana Solidaritas:</strong> Rp 120.000 / SDM / Tahun akan ditagihkan setiap bulan <strong>JULI</strong>.</li>
             <li><strong>Batas Klaim:</strong> SDM hanya bisa mengklaim dana suka duka <strong>1x dalam 1 tahun</strong>.</li>
             <li><strong>Ketentuan Tunggakan:</strong> Apabila tidak melakukan pembayaran Asosiasi dalam waktu <strong>maksimal 3 bulan</strong>, maka Kab/Kota tidak bisa mengajukan klaim suka duka untuk SDM-nya.</li>
           </ul>
