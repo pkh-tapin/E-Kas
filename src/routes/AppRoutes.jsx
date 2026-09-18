@@ -17,21 +17,23 @@ export default function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-      {/* Area aplikasi utama dengan Layout & Navigation */}
+      {/* Akses Publik / Semua User */}
       <Route element={<ProtectedRoute allowedRoles={['user', 'admin', 'superadmin']} />}>
         <Route element={<MainLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/asosiasi" element={<Asosiasi />} />
-          <Route path="/database-sdm" element={<DatabaseSDM />} />
           <Route path="/rekap-asosiasi" element={<RekapAsosiasi />} />
-          <Route path="/riwayat-transaksi" element={<RiwayatTransaksi />} />
-          
-          {/* Alias / Fallback agar tidak redirect ke dashboard saat diklik */}
-          <Route path="/riwayat" element={<Navigate to="/riwayat-transaksi" replace />} />
 
-          {/* Akses Admin & Superadmin */}
+          {/* Akses Khusus Admin & Superadmin */}
           <Route element={<ProtectedRoute allowedRoles={['admin', 'superadmin']} />}>
+            <Route path="/riwayat-transaksi" element={<RiwayatTransaksi />} />
+            <Route path="/riwayat" element={<RiwayatTransaksi />} />
             <Route path="/tambah-data" element={<TambahData />} />
+          </Route>
+
+          {/* Akses Khusus Super Admin */}
+          <Route element={<ProtectedRoute allowedRoles={['superadmin']} />}>
+            <Route path="/database-sdm" element={<DatabaseSDM />} />
             <Route path="/pengaturan" element={<Pengaturan />} />
           </Route>
         </Route>
