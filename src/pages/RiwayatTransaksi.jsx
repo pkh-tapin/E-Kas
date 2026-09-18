@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import Swal from 'sweetalert2';
 import { 
   History, Search, Filter, ArrowDownToLine, ArrowUpFromLine, 
-  Wallet, Download, ArrowUpDown, Calendar, Edit3, Trash2, X, Check, Save
+  Wallet, Download, ArrowUpDown, Calendar, Edit3, Trash2, X, Check, Save,
+  ChevronLeft, ChevronRight, DatabaseBackup
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -13,17 +14,24 @@ import {
   parseTimestamp, 
   fetchAPI,
   getFromFirebase,
-  saveToFirebase
+  saveToFirebase,
+  migrateSpreadsheetToFirebase
 } from '../services/api';
 
 export default function RiwayatTransaksi() {
   const { role } = useAuth();
   const isSuperAdmin = role === 'superadmin';
+  const isAdmin = role === 'admin' || isSuperAdmin;
 
+  const [loadingSync, setLoadingSync] = useState(false);
   const [search, setSearch] = useState('');
   const [filterJenis, setFilterJenis] = useState('Semua');
   const [filterBendahara, setFilterBendahara] = useState('Semua');
   const [sortOrder, setSortOrder] = useState('terbaru');
+
+  // State Pagination untuk menangani 700+ baris data agar cepat
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
 
   const [rawIn, setRawIn] = useState([]);
   const [rawOut, setRawOut] = useState([]);
@@ -94,95 +102,134 @@ export default function RiwayatTransaksi() {
     return `${dayName}, ${dayDate} ${monthName} ${year}`;
   };
 
-  // Gabungkan Log Transaksi Masuk & Keluar
-  const allTransactions = [];
-
-  rawIn.forEach((row, idx) => {
-    const id = row[0] || `IN-${idx}`;
-    const tglRaw = row[1] || '-';
-    const jenis = 'Pemasukan';
-    const kat = row[3] || row[2] || 'Umum';
-    const kep = row[4] || row[3] || '-';
-    const nom = Number(row[6] || row[4] || 0);
-    const bend = row[8] || row[7] || 'Herni';
-    const time = row[9] || parseTimestamp(tglRaw);
-
-    allTransactions.push({
-      id,
-      tglRaw,
-      tglDisplay: formatDateWithDay(tglRaw),
-      jenis,
-      kategori: kat,
-      keperluan: kep,
-      nominal: nom,
-      bendahara: bend,
-      timestamp: time,
-      rawRow: row
+  // SINKRONISASI DATA MANUAL DARI GOOGLE SPREADSHEET
+  const handleSyncData = async () => {
+    setLoadingSync(true);
+    Swal.fire({
+      title: 'Menyinkronkan 700+ Data...',
+      text: 'Menarik seluruh baris transaksi terbaru dari Google Spreadsheet',
+      didOpen: () => Swal.showLoading()
     });
-  });
 
-  rawOut.forEach((row, idx) => {
-    const id = row[0] || `OUT-${idx}`;
-    const tglRaw = row[1] || '-';
-    const jenis = 'Pengeluaran';
-    const kat = row[3] || row[2] || 'Umum';
-    const kep = row[4] || row[3] || '-';
-    const nom = Number(row[6] || row[4] || 0);
-    const bend = row[8] || row[7] || 'Herni';
-    const time = row[9] || parseTimestamp(tglRaw);
+    const res = await migrateSpreadsheetToFirebase();
+    setLoadingSync(false);
 
-    allTransactions.push({
-      id,
-      tglRaw,
-      tglDisplay: formatDateWithDay(tglRaw),
-      jenis,
-      kategori: kat,
-      keperluan: kep,
-      nominal: nom,
-      bendahara: bend,
-      timestamp: time,
-      rawRow: row
-    });
-  });
-
-  // FILTERING DATA
-  const filteredList = allTransactions.filter((item) => {
-    const searchLower = search.toLowerCase();
-    const matchSearch = 
-      item.id.toLowerCase().includes(searchLower) ||
-      item.kategori.toLowerCase().includes(searchLower) ||
-      item.keperluan.toLowerCase().includes(searchLower) ||
-      item.bendahara.toLowerCase().includes(searchLower);
-
-    const matchJenis = filterJenis === 'Semua' ? true : item.jenis === filterJenis;
-    const matchBendahara = filterBendahara === 'Semua' ? true : 
-      item.bendahara.toLowerCase().trim() === filterBendahara.toLowerCase().trim();
-
-    return matchSearch && matchJenis && matchBendahara;
-  });
-
-  // SORTING DATA
-  filteredList.sort((a, b) => {
-    if (sortOrder === 'terbaru') {
-      return b.timestamp - a.timestamp;
-    } else if (sortOrder === 'terlama') {
-      return a.timestamp - b.timestamp;
-    } else if (sortOrder === 'nominal_terbesar') {
-      return b.nominal - a.nominal;
-    } else if (sortOrder === 'nominal_terkecil') {
-      return a.nominal - b.nominal;
+    if (res.success) {
+      Swal.fire('Berhasil!', 'Seluruh riwayat transaksi telah disinkronkan.', 'success');
+    } else {
+      Swal.fire('Gagal Sync', res.error || 'Terjadi kesalahan jaringan.', 'error');
     }
-    return b.timestamp - a.timestamp;
-  });
+  };
 
+  // GABUNGKAN & MEMOIZE SELURUH LOG TRANSAKSI MASUK & KELUAR
+  const allTransactions = useMemo(() => {
+    const list = [];
+
+    rawIn.forEach((row, idx) => {
+      const id = row[0] || `IN-${idx}`;
+      const tglRaw = row[1] || '-';
+      const jenis = 'Pemasukan';
+      const kat = row[3] || row[2] || 'Umum';
+      const kep = row[4] || row[3] || '-';
+      const nom = Number(row[6] || row[4] || 0);
+      const bend = row[8] || row[7] || 'Herni';
+      const time = row[9] || parseTimestamp(tglRaw);
+
+      list.push({
+        id,
+        tglRaw,
+        tglDisplay: formatDateWithDay(tglRaw),
+        jenis,
+        kategori: kat,
+        keperluan: kep,
+        nominal: nom,
+        bendahara: bend,
+        timestamp: time,
+        rawRow: row
+      });
+    });
+
+    rawOut.forEach((row, idx) => {
+      const id = row[0] || `OUT-${idx}`;
+      const tglRaw = row[1] || '-';
+      const jenis = 'Pengeluaran';
+      const kat = row[3] || row[2] || 'Umum';
+      const kep = row[4] || row[3] || '-';
+      const nom = Number(row[6] || row[4] || 0);
+      const bend = row[8] || row[7] || 'Herni';
+      const time = row[9] || parseTimestamp(tglRaw);
+
+      list.push({
+        id,
+        tglRaw,
+        tglDisplay: formatDateWithDay(tglRaw),
+        jenis,
+        kategori: kat,
+        keperluan: kep,
+        nominal: nom,
+        bendahara: bend,
+        timestamp: time,
+        rawRow: row
+      });
+    });
+
+    return list;
+  }, [rawIn, rawOut]);
+
+  // FILTERING & SORTING DATA 700+ BARIS
+  const filteredList = useMemo(() => {
+    let result = allTransactions.filter((item) => {
+      const searchLower = search.toLowerCase();
+      const matchSearch = 
+        item.id.toLowerCase().includes(searchLower) ||
+        item.kategori.toLowerCase().includes(searchLower) ||
+        item.keperluan.toLowerCase().includes(searchLower) ||
+        item.bendahara.toLowerCase().includes(searchLower);
+
+      const matchJenis = filterJenis === 'Semua' ? true : item.jenis === filterJenis;
+      const matchBendahara = filterBendahara === 'Semua' ? true : 
+        item.bendahara.toLowerCase().trim() === filterBendahara.toLowerCase().trim();
+
+      return matchSearch && matchJenis && matchBendahara;
+    });
+
+    result.sort((a, b) => {
+      if (sortOrder === 'terbaru') {
+        return b.timestamp - a.timestamp;
+      } else if (sortOrder === 'terlama') {
+        return a.timestamp - b.timestamp;
+      } else if (sortOrder === 'nominal_terbesar') {
+        return b.nominal - a.nominal;
+      } else if (sortOrder === 'nominal_terkecil') {
+        return a.nominal - b.nominal;
+      }
+      return b.timestamp - a.timestamp;
+    });
+
+    return result;
+  }, [allTransactions, search, filterJenis, filterBendahara, sortOrder]);
+
+  // RESET PAGE SAAT FILTER BERUBAH
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterJenis, filterBendahara, sortOrder, itemsPerPage]);
+
+  // METRIK RINGKASAN
   const totalRecords = filteredList.length;
-  const totalPemasukanFiltered = filteredList
-    .filter(i => i.jenis === 'Pemasukan')
-    .reduce((acc, curr) => acc + curr.nominal, 0);
+  const totalPemasukanFiltered = useMemo(() => {
+    return filteredList.filter(i => i.jenis === 'Pemasukan').reduce((acc, curr) => acc + curr.nominal, 0);
+  }, [filteredList]);
 
-  const totalPengeluaranFiltered = filteredList
-    .filter(i => i.jenis === 'Pengeluaran')
-    .reduce((acc, curr) => acc + curr.nominal, 0);
+  const totalPengeluaranFiltered = useMemo(() => {
+    return filteredList.filter(i => i.jenis === 'Pengeluaran').reduce((acc, curr) => acc + curr.nominal, 0);
+  }, [filteredList]);
+
+  // PAGINASI ULTRACAPAT UNTUK 700+ BARIS
+  const totalPages = Math.ceil(totalRecords / itemsPerPage) || 1;
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredList.slice(start, start + itemsPerPage);
+  }, [filteredList, currentPage, itemsPerPage]);
 
   // LOGIKA EDIT TRANSAKSI (SUPER ADMIN)
   const handleOpenEdit = (item) => {
@@ -225,11 +272,9 @@ export default function RiwayatTransaksi() {
         dashboardOut: []
       };
 
-      // 1. Hapus transaksi lama dari list
       let newFullIn = (currentDash.fullIn || []).filter(r => r[0] !== editForm.id);
       let newFullOut = (currentDash.fullOut || []).filter(r => r[0] !== editForm.id);
 
-      // 2. Format baris baru
       const tglFormatted = formatDateIndo(editForm.tanggal);
       const rawTime = parseTimestamp(editForm.tanggal);
       const nom = Number(editForm.nominal || 0);
@@ -247,14 +292,12 @@ export default function RiwayatTransaksi() {
         rawTime
       ];
 
-      // 3. Masukkan transaksi yang telah diubah
       if (editForm.jenis === 'Pemasukan') {
         newFullIn = [rowFormat, ...newFullIn];
       } else {
         newFullOut = [rowFormat, ...newFullOut];
       }
 
-      // 4. Hitung ulang total saldo & metrik
       let totalMasuk = 0, totalIuran = 0, totalKeluar = 0;
       let herni = 0, sari = 0, dina = 0;
 
@@ -396,14 +439,14 @@ export default function RiwayatTransaksi() {
       XLSX.utils.book_append_sheet(workbook, worksheet, "Riwayat Transaksi");
       XLSX.writeFile(workbook, `Laporan_Riwayat_Transaksi_SDM_${new Date().toISOString().split('T')[0]}.xlsx`);
 
-      Swal.fire('Export Berhasil', 'File Excel riwayat transaksi telah terunduh.', 'success');
+      Swal.fire('Export Berhasil', `File Excel berisi ${filteredList.length} transaksi telah terunduh.`, 'success');
     } catch (err) {
       Swal.fire('Gagal Export', 'Terjadi kesalahan saat mengunduh Excel.', 'error');
     }
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in relative z-10">
       {/* HEADER PAGE */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
@@ -414,12 +457,24 @@ export default function RiwayatTransaksi() {
           <p className="text-gray-500 text-sm">Daftar lengkap seluruh jurnal pemasukan dan pengeluaran e-Kas SDM.</p>
         </div>
 
-        <button
-          onClick={handleExportExcel}
-          className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition"
-        >
-          <Download className="w-4 h-4" /> Export Excel
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && (
+            <button
+              onClick={handleSyncData}
+              disabled={loadingSync}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition cursor-pointer disabled:bg-gray-400"
+            >
+              <DatabaseBackup className="w-4 h-4" /> Sync Spreadsheet
+            </button>
+          )}
+
+          <button
+            onClick={handleExportExcel}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition cursor-pointer"
+          >
+            <Download className="w-4 h-4" /> Export Excel ({filteredList.length})
+          </button>
+        </div>
       </div>
 
       {/* METRIC SUMMARY CARDS */}
@@ -429,7 +484,7 @@ export default function RiwayatTransaksi() {
             <Wallet className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">TOTAL RECORD</span>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">TOTAL RECORD DITEMUKAN</span>
             <div className="text-2xl font-black text-gray-800">{totalRecords} <span className="text-xs font-normal text-gray-400">Transaksi</span></div>
           </div>
         </div>
@@ -477,7 +532,7 @@ export default function RiwayatTransaksi() {
                 <button
                   key={j}
                   onClick={() => setFilterJenis(j)}
-                  className={`px-3 py-1.5 rounded-lg transition ${
+                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                     filterJenis === j ? 'bg-white text-gray-800 shadow-sm font-black' : 'text-gray-500'
                   }`}
                 >
@@ -490,7 +545,7 @@ export default function RiwayatTransaksi() {
             <select
               value={filterBendahara}
               onChange={(e) => setFilterBendahara(e.target.value)}
-              className="px-3 py-2 bg-gray-50 border rounded-xl text-xs font-bold text-gray-700 outline-none focus:ring-2 focus:ring-green-600"
+              className="px-3 py-2 bg-gray-50 border rounded-xl text-xs font-bold text-gray-700 outline-none focus:ring-2 focus:ring-green-600 cursor-pointer"
             >
               <option value="Semua">Semua Bendahara</option>
               {bendaharaOptions.map((b) => (
@@ -533,14 +588,14 @@ export default function RiwayatTransaksi() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredList.length === 0 ? (
+              {paginatedData.length === 0 ? (
                 <tr>
                   <td colSpan={isSuperAdmin ? 7 : 6} className="text-center py-12 text-gray-400 font-medium">
                     Tidak ditemukan data riwayat transaksi yang sesuai.
                   </td>
                 </tr>
               ) : (
-                filteredList.map((item) => (
+                paginatedData.map((item) => (
                   <tr key={item.id} className="hover:bg-gray-50/80 transition-colors">
                     <td className="p-4 font-extrabold text-gray-700 whitespace-nowrap">
                       {item.tglDisplay}
@@ -580,14 +635,14 @@ export default function RiwayatTransaksi() {
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             onClick={() => handleOpenEdit(item)}
-                            className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition"
+                            className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition cursor-pointer"
                             title="Edit Transaksi"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleDeleteTransaction(item)}
-                            className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition"
+                            className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition cursor-pointer"
                             title="Hapus Transaksi"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -601,6 +656,50 @@ export default function RiwayatTransaksi() {
             </tbody>
           </table>
         </div>
+
+        {/* BAR PAGINASI NAVIGASI UNTUK 700+ DATA */}
+        {totalRecords > 0 && (
+          <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs font-bold text-gray-600">
+            <div className="flex items-center gap-2">
+              <span>Tampilkan per halaman:</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                className="bg-white border rounded-lg px-2 py-1 outline-none font-bold cursor-pointer"
+              >
+                <option value={25}>25 Baris</option>
+                <option value={50}>50 Baris</option>
+                <option value={100}>100 Baris</option>
+                <option value={200}>200 Baris</option>
+              </select>
+              <span className="text-gray-400 font-normal">
+                (Menampilkan {Math.min((currentPage - 1) * itemsPerPage + 1, totalRecords)} - {Math.min(currentPage * itemsPerPage, totalRecords)} dari {totalRecords} total transaksi)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                className="p-2 bg-white border rounded-xl hover:bg-gray-100 transition disabled:opacity-40 cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              
+              <span className="px-3 py-1 bg-green-700 text-white rounded-xl font-extrabold">
+                Halaman {currentPage} dari {totalPages}
+              </span>
+
+              <button
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                className="p-2 bg-white border rounded-xl hover:bg-gray-100 transition disabled:opacity-40 cursor-pointer"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* MODAL EDIT TRANSAKSI (SUPER ADMIN) */}
@@ -611,7 +710,7 @@ export default function RiwayatTransaksi() {
               <h3 className="font-black text-lg text-gray-800 flex items-center gap-2">
                 <Edit3 className="w-5 h-5 text-blue-600" /> Edit Transaksi
               </h3>
-              <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-gray-600 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -634,7 +733,7 @@ export default function RiwayatTransaksi() {
                   required
                   value={editForm.jenis}
                   onChange={(e) => setEditForm({ ...editForm, jenis: e.target.value })}
-                  className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-600 font-bold"
+                  className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-600 font-bold cursor-pointer"
                 >
                   <option value="Pemasukan">Pemasukan</option>
                   <option value="Pengeluaran">Pengeluaran</option>
@@ -669,7 +768,7 @@ export default function RiwayatTransaksi() {
                   required
                   value={editForm.bendahara}
                   onChange={(e) => setEditForm({ ...editForm, bendahara: e.target.value })}
-                  className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-600 font-bold"
+                  className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-600 font-bold cursor-pointer"
                 >
                   {bendaharaOptions.length === 0 ? (
                     <option value="Herni">Herni</option>
@@ -696,13 +795,13 @@ export default function RiwayatTransaksi() {
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold text-sm"
+                  className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold text-sm cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md shadow-blue-600/20"
+                  className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md shadow-blue-600/20 cursor-pointer"
                 >
                   Simpan Perubahan
                 </button>
