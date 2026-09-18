@@ -14,12 +14,10 @@ import RiwayatTransaksi from '../pages/RiwayatTransaksi';
 export default function AppRoutes() {
   return (
     <Routes>
-      {/* Route Login (Tanpa Sidebar/Topbar) */}
       <Route path="/login" element={<Login />} />
-
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-      {/* Semua halaman yang membutuhkan Sidebar & Topbar */}
+      {/* Area aplikasi utama dengan Layout & Navigation */}
       <Route element={<ProtectedRoute allowedRoles={['user', 'admin', 'superadmin']} />}>
         <Route element={<MainLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
@@ -27,8 +25,11 @@ export default function AppRoutes() {
           <Route path="/database-sdm" element={<DatabaseSDM />} />
           <Route path="/rekap-asosiasi" element={<RekapAsosiasi />} />
           <Route path="/riwayat-transaksi" element={<RiwayatTransaksi />} />
+          
+          {/* Alias / Fallback agar tidak redirect ke dashboard saat diklik */}
+          <Route path="/riwayat" element={<Navigate to="/riwayat-transaksi" replace />} />
 
-          {/* Halaman Khusus Admin & Superadmin */}
+          {/* Akses Admin & Superadmin */}
           <Route element={<ProtectedRoute allowedRoles={['admin', 'superadmin']} />}>
             <Route path="/tambah-data" element={<TambahData />} />
             <Route path="/pengaturan" element={<Pengaturan />} />
@@ -36,7 +37,6 @@ export default function AppRoutes() {
         </Route>
       </Route>
 
-      {/* Redirect jika URL salah */}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );
