@@ -237,10 +237,21 @@ export const fetchAPI = async (action, payload = null) => {
     const sysConfig = (await getFromFirebase("pengaturan_cache"))?.system;
     const apiUrl = sysConfig?.webAppUrl || DEFAULT_API_URL;
 
-    const autoID = `D-${Date.now()}`;
+    // Mempertahankan ID transaksi lama jika dalam mode edit (mencegah data ganda)
+    const autoID = payload?.id || `D-${Date.now()}`;
     const tglRaw = payload?.tanggal || new Date().toISOString().split('T')[0];
     const tglFormatted = formatDateIndo(tglRaw);
     const rawTime = parseTimestamp(tglRaw);
+
+    const updateOrPrepend = (list, newRow) => {
+      const idx = list.findIndex(r => r[0] === autoID);
+      if (idx !== -1) {
+        const newList = [...list];
+        newList[idx] = newRow;
+        return newList;
+      }
+      return [newRow, ...list];
+    };
 
     if (action === 'simpanDana' && payload) {
       const currentDash = (await getFromFirebase("dashboard_cache")) || {
@@ -277,13 +288,19 @@ export const fetchAPI = async (action, payload = null) => {
       ];
 
       if (isMasuk) {
-        currentDash.totals.masuk = (currentDash.totals.masuk || 0) + nom;
-        currentDash.fullIn = [rowFormat, ...(currentDash.fullIn || [])];
-        currentDash.dashboardIn = [dashRowFormat, ...(currentDash.dashboardIn || [])];
+        const existingRow = (currentDash.fullIn || []).find(r => r[0] === autoID);
+        if (!existingRow) {
+          currentDash.totals.masuk = (currentDash.totals.masuk || 0) + nom;
+        }
+        currentDash.fullIn = updateOrPrepend(currentDash.fullIn || [], rowFormat);
+        currentDash.dashboardIn = updateOrPrepend(currentDash.dashboardIn || [], dashRowFormat);
       } else {
-        currentDash.totals.keluar = (currentDash.totals.keluar || 0) + nom;
-        currentDash.fullOut = [rowFormat, ...(currentDash.fullOut || [])];
-        currentDash.dashboardOut = [dashRowFormat, ...(currentDash.dashboardOut || [])];
+        const existingRow = (currentDash.fullOut || []).find(r => r[0] === autoID);
+        if (!existingRow) {
+          currentDash.totals.keluar = (currentDash.totals.keluar || 0) + nom;
+        }
+        currentDash.fullOut = updateOrPrepend(currentDash.fullOut || [], rowFormat);
+        currentDash.dashboardOut = updateOrPrepend(currentDash.dashboardOut || [], dashRowFormat);
       }
 
       const bName = (payload.bendahara || '').toLowerCase();
@@ -311,7 +328,10 @@ export const fetchAPI = async (action, payload = null) => {
       const nom = Number(payload.nominal || 0);
       const kepStr = `Penyetoran Iuran a.n: ${payload.nama}`;
 
-      currentDash.totals.iuran = (currentDash.totals.iuran || 0) + nom;
+      const existingRow = (currentDash.fullIn || []).find(r => r[0] === autoID);
+      if (!existingRow) {
+        currentDash.totals.iuran = (currentDash.totals.iuran || 0) + nom;
+      }
 
       if (Array.isArray(currentDash.statusIuran)) {
         currentDash.statusIuran = currentDash.statusIuran.map(item => {
@@ -342,8 +362,8 @@ export const fetchAPI = async (action, payload = null) => {
       ];
       const dashRowFormat = [tglFormatted, 'Iuran', kepStr, nom, rawTime];
 
-      currentDash.fullIn = [rowFormat, ...(currentDash.fullIn || [])];
-      currentDash.dashboardIn = [dashRowFormat, ...(currentDash.dashboardIn || [])];
+      currentDash.fullIn = updateOrPrepend(currentDash.fullIn || [], rowFormat);
+      currentDash.dashboardIn = updateOrPrepend(currentDash.dashboardIn || [], dashRowFormat);
 
       await saveToFirebase("dashboard_cache", currentDash);
     }
