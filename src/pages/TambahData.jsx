@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import Swal from 'sweetalert2';
-import { Save, Users, Gift, ArrowDownToLine, ArrowUpFromLine, Plus, Trash2, Lock, Search, ChevronDown } from 'lucide-react';
+import { 
+  Save, Users, Gift, Plus, Trash2, Lock, Search, ChevronDown,
+  Coins, Banknote, ArrowDownCircle, ArrowUpCircle, Info, HelpCircle
+} from 'lucide-react';
 import { 
   fetchAPI, 
   subscribeSDMData, 
@@ -319,42 +322,86 @@ export default function TambahData({ userRole = 'super_admin' }) {
         <p className="text-gray-500 text-sm mt-1">Catat transaksi kas, iuran, dan klaim pencairan secara terpusat (Auto-Sync Database).</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {/* PILIHAN MENU TRANSAKSI DENGAN ICON DAN WARNA JELAS */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <button
           onClick={() => setActiveTab('pemasukan')}
-          className={`py-3 px-3 font-bold text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-1.5 transition ${
-            activeTab === 'pemasukan' ? 'bg-green-700 text-white shadow-md font-extrabold' : 'bg-white border text-gray-600 hover:bg-gray-50'
+          className={`py-3.5 px-3 font-bold text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-2 transition cursor-pointer border-2 ${
+            activeTab === 'pemasukan' 
+              ? 'bg-green-700 border-green-800 text-white shadow-lg font-black scale-[1.02]' 
+              : 'bg-white border-green-200 text-green-800 hover:bg-green-50/70'
           }`}
         >
-          <ArrowDownToLine className="w-4 h-4 text-green-300" /> Pemasukan Kas
+          <div className="flex items-center gap-1 bg-green-800/30 p-1.5 rounded-xl">
+            <Coins className="w-5 h-5 text-green-300" />
+            <ArrowDownCircle className="w-4 h-4 text-green-200" />
+          </div>
+          <span className="tracking-tight">Uang Masuk</span>
         </button>
 
         <button
           onClick={() => setActiveTab('pengeluaran')}
-          className={`py-3 px-3 font-bold text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-1.5 transition ${
-            activeTab === 'pengeluaran' ? 'bg-red-600 text-white shadow-md font-extrabold' : 'bg-white border text-gray-600 hover:bg-gray-50'
+          className={`py-3.5 px-3 font-bold text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-2 transition cursor-pointer border-2 ${
+            activeTab === 'pengeluaran' 
+              ? 'bg-red-600 border-red-700 text-white shadow-lg font-black scale-[1.02]' 
+              : 'bg-white border-red-200 text-red-700 hover:bg-red-50/70'
           }`}
         >
-          <ArrowUpFromLine className="w-4 h-4 text-red-200" /> Pengeluaran Kas
+          <div className="flex items-center gap-1 bg-red-800/30 p-1.5 rounded-xl">
+            <Banknote className="w-5 h-5 text-red-200" />
+            <ArrowUpCircle className="w-4 h-4 text-red-100" />
+          </div>
+          <span className="tracking-tight">Uang Keluar</span>
         </button>
 
         <button
           onClick={() => setActiveTab('iuran')}
-          className={`py-3 px-3 font-bold text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-1.5 transition ${
-            activeTab === 'iuran' ? 'bg-amber-600 text-white shadow-md font-extrabold' : 'bg-white border text-gray-600 hover:bg-gray-50'
+          className={`py-3.5 px-3 font-bold text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-2 transition cursor-pointer border-2 ${
+            activeTab === 'iuran' 
+              ? 'bg-amber-600 border-amber-700 text-white shadow-lg font-black scale-[1.02]' 
+              : 'bg-white border-amber-200 text-amber-800 hover:bg-amber-50/70'
           }`}
         >
-          <Users className="w-4 h-4 text-amber-200" /> Bayar Asosiasi
+          <Users className="w-5 h-5 text-amber-200" />
+          <span>Bayar Asosiasi</span>
         </button>
 
         <button
           onClick={() => setActiveTab('klaim')}
-          className={`py-3 px-3 font-bold text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-1.5 transition ${
-            activeTab === 'klaim' ? 'bg-purple-700 text-white shadow-md font-extrabold' : 'bg-white border text-gray-600 hover:bg-gray-50'
+          className={`py-3.5 px-3 font-bold text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row items-center justify-center gap-2 transition cursor-pointer border-2 ${
+            activeTab === 'klaim' 
+              ? 'bg-purple-700 border-purple-800 text-white shadow-lg font-black scale-[1.02]' 
+              : 'bg-white border-purple-200 text-purple-800 hover:bg-purple-50/70'
           }`}
         >
-          <Gift className="w-4 h-4 text-purple-200" /> Rekap Klaim
+          <Gift className="w-5 h-5 text-purple-200" />
+          <span>Rekap Klaim</span>
         </button>
+      </div>
+
+      {/* KOTAK PETUNJUK MEMILIH TRANSAKSI AGAR TIDAK TERTUKAR */}
+      <div className="bg-blue-50/90 border-l-4 border-blue-600 p-4 rounded-2xl shadow-sm space-y-2">
+        <div className="flex items-center gap-2 text-blue-900 font-extrabold text-xs sm:text-sm">
+          <Info className="w-4 h-4 text-blue-600 flex-shrink-0" />
+          <span>Petunjuk Pemilihan Jenis Transaksi (Agar Tidak Tertukar):</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          <div className="bg-white p-2.5 rounded-xl border border-green-200 text-green-900 flex items-center gap-2">
+            <Coins className="w-4 h-4 text-green-600 flex-shrink-0" />
+            <div>
+              <span className="font-black text-green-700 uppercase">Uang Masuk (Hijau):</span>
+              <p className="text-[11px] text-gray-600">Dipilih jika <strong>KAS BERTAMBAH</strong> (contoh: Hibah, Donasi, Transfer Dana Masuk).</p>
+            </div>
+          </div>
+
+          <div className="bg-white p-2.5 rounded-xl border border-red-200 text-red-900 flex items-center gap-2">
+            <Banknote className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <div>
+              <span className="font-black text-red-600 uppercase">Uang Keluar (Merah):</span>
+              <p className="text-[11px] text-gray-600">Dipilih jika <strong>KAS BERKURANG</strong> (contoh: Belanja ATK, Konsumsi, Acara).</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {(activeTab === 'pemasukan' || activeTab === 'pengeluaran') && (
@@ -365,15 +412,29 @@ export default function TambahData({ userRole = 'super_admin' }) {
           }`}
         >
           <h2 className="text-lg font-black text-gray-800 mb-4 border-b pb-2 flex justify-between items-center">
-            <span>Catat {activeTab === 'pemasukan' ? 'Pemasukan' : 'Pengeluaran'} Kas Umum</span>
-            <span className="text-xs bg-green-100 text-green-800 px-2.5 py-1 rounded-full font-bold">
-              Sync Active
+            <span className="flex items-center gap-2">
+              {activeTab === 'pemasukan' ? (
+                <>
+                  <Coins className="w-6 h-6 text-green-700" />
+                  <span>Catat Uang Masuk (Pemasukan Kas)</span>
+                </>
+              ) : (
+                <>
+                  <Banknote className="w-6 h-6 text-red-600" />
+                  <span>Catat Uang Keluar (Pengeluaran Kas)</span>
+                </>
+              )}
+            </span>
+            <span className={`text-xs px-2.5 py-1 rounded-full font-extrabold ${
+              activeTab === 'pemasukan' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+            }`}>
+              Auto-Sync Active
             </span>
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-gray-600 mb-1">Tanggal</label>
+              <label className="block text-xs font-bold text-gray-600 mb-1">Tanggal Transaksi</label>
               <input
                 type="date"
                 required
@@ -402,11 +463,11 @@ export default function TambahData({ userRole = 'super_admin' }) {
               </select>
             </div>
 
-            {/* Kategori hanya tampil pada Pengeluaran */}
+            {/* Kategori hanya tampil pada Uang Keluar */}
             {activeTab === 'pengeluaran' && (
               <div className="col-span-2">
                 <div className="flex justify-between items-center mb-1">
-                  <label className="block text-xs font-bold text-gray-600">Kategori Transaksi</label>
+                  <label className="block text-xs font-bold text-gray-600">Kategori Transaksi Pengeluaran</label>
                   {userRole === 'super_admin' && (
                     <button
                       type="button"
@@ -471,7 +532,7 @@ export default function TambahData({ userRole = 'super_admin' }) {
             <input
               type="text"
               required
-              placeholder={activeTab === 'pemasukan' ? 'Contoh: Kas Daerah, Donasi, dll...' : 'Keterangan transaksi...'}
+              placeholder={activeTab === 'pemasukan' ? 'Contoh: Kas Daerah, Donasi, Transfer Masuk, dll...' : 'Keterangan transaksi pengeluaran...'}
               value={formDana.nama_barang}
               onChange={(e) => setFormDana({ ...formDana, nama_barang: e.target.value })}
               className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-600"
@@ -500,18 +561,21 @@ export default function TambahData({ userRole = 'super_admin' }) {
           <button
             type="submit"
             disabled={loading}
-            className={`w-full text-white py-3.5 rounded-2xl font-bold transition disabled:bg-gray-400 mt-4 flex justify-center items-center gap-2 shadow-md ${
+            className={`w-full text-white py-3.5 rounded-2xl font-bold transition disabled:bg-gray-400 mt-4 flex justify-center items-center gap-2 shadow-md cursor-pointer ${
               activeTab === 'pemasukan' ? 'bg-green-700 hover:bg-green-800' : 'bg-red-600 hover:bg-red-700'
             }`}
           >
-            {loading ? 'Menyimpan...' : <><Save className="w-5 h-5" /> Simpan {activeTab === 'pemasukan' ? 'Pemasukan' : 'Pengeluaran'}</>}
+            {loading ? 'Menyimpan...' : <><Save className="w-5 h-5" /> Simpan {activeTab === 'pemasukan' ? 'Uang Masuk' : 'Uang Keluar'}</>}
           </button>
         </form>
       )}
 
       {activeTab === 'iuran' && (
         <form onSubmit={handleSubmitIuran} className="bg-white rounded-3xl shadow-sm border p-6 space-y-4 border-t-4 border-t-amber-600">
-          <h2 className="text-lg font-black text-gray-800 mb-4 border-b pb-2">Catat Penyetoran Iuran Asosiasi</h2>
+          <h2 className="text-lg font-black text-gray-800 mb-4 border-b pb-2 flex items-center gap-2">
+            <Users className="w-6 h-6 text-amber-600" />
+            <span>Catat Penyetoran Iuran Asosiasi</span>
+          </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -545,7 +609,6 @@ export default function TambahData({ userRole = 'super_admin' }) {
             </div>
           </div>
 
-          {/* Searchable Select SDM Nama */}
           <div>
             <label className="block text-xs font-bold text-gray-600 mb-1">Atas Nama SDM (Ketik / Pilih Nama)</label>
             <SearchableSDMSelect 
@@ -576,7 +639,7 @@ export default function TambahData({ userRole = 'super_admin' }) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-amber-600 text-white py-3.5 rounded-2xl font-bold hover:bg-amber-700 transition disabled:bg-gray-400 mt-4 flex justify-center items-center gap-2 shadow-md shadow-amber-600/20"
+            className="w-full bg-amber-600 text-white py-3.5 rounded-2xl font-bold hover:bg-amber-700 transition disabled:bg-gray-400 mt-4 flex justify-center items-center gap-2 shadow-md shadow-amber-600/20 cursor-pointer"
           >
             {loading ? 'Merekam...' : <><Save className="w-5 h-5" /> Simpan Penyetoran Asosiasi</>}
           </button>
@@ -585,7 +648,10 @@ export default function TambahData({ userRole = 'super_admin' }) {
 
       {activeTab === 'klaim' && (
         <form onSubmit={handleSubmitKlaim} className="bg-white rounded-3xl shadow-sm border p-6 space-y-4 border-t-4 border-t-purple-700">
-          <h2 className="text-lg font-black text-gray-800 mb-2 border-b pb-2">Catat Rekap Pencairan / Klaim Asosiasi</h2>
+          <h2 className="text-lg font-black text-gray-800 mb-2 border-b pb-2 flex items-center gap-2">
+            <Gift className="w-6 h-6 text-purple-700" />
+            <span>Catat Rekap Pencairan / Klaim Asosiasi</span>
+          </h2>
           <p className="text-xs text-purple-700 font-bold bg-purple-50 p-2.5 rounded-xl border border-purple-100 mb-4">
             Pengaturan Batas Klaim Aktif: Maksimal {maxKlaimTahunan}x per sumber dana (Kabupaten / Provinsi) dalam 1 tahun.
           </p>
@@ -664,7 +730,7 @@ export default function TambahData({ userRole = 'super_admin' }) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-purple-700 text-white py-3.5 rounded-2xl font-bold hover:bg-purple-800 transition disabled:bg-gray-400 mt-4 flex justify-center items-center gap-2 shadow-md shadow-purple-700/20"
+            className="w-full bg-purple-700 text-white py-3.5 rounded-2xl font-bold hover:bg-purple-800 transition disabled:bg-gray-400 mt-4 flex justify-center items-center gap-2 shadow-md shadow-purple-700/20 cursor-pointer"
           >
             {loading ? 'Menyimpan...' : <><Save className="w-5 h-5" /> Catat Rekap Pencairan Asosiasi</>}
           </button>
