@@ -4,7 +4,7 @@ import Swal from 'sweetalert2';
 import { 
   History, Search, Filter, ArrowDownToLine, ArrowUpFromLine, 
   Wallet, Download, ArrowUpDown, Calendar, Edit3, Trash2, X, Check, Save,
-  ChevronLeft, ChevronRight, DatabaseBackup
+  ChevronLeft, ChevronRight, DatabaseBackup, ShieldCheck, Clock, FileText, Activity
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -15,7 +15,9 @@ import {
   fetchAPI,
   getFromFirebase,
   saveToFirebase,
-  migrateSpreadsheetToFirebase
+  migrateSpreadsheetToFirebase,
+  syncMutationToSpreadsheet,
+  listenFirebase
 } from '../services/api';
 
 export default function RiwayatTransaksi() {
@@ -23,19 +25,23 @@ export default function RiwayatTransaksi() {
   const isSuperAdmin = role === 'superadmin';
   const isAdmin = role === 'admin' || isSuperAdmin;
 
+  // Sub-menu Tab State (Daftar Transaksi vs Riwayat Perubahan)
+  const [activeTab, setActiveTab] = useState('transaksi');
+
   const [loadingSync, setLoadingSync] = useState(false);
   const [search, setSearch] = useState('');
   const [filterJenis, setFilterJenis] = useState('Semua');
   const [filterBendahara, setFilterBendahara] = useState('Semua');
   const [sortOrder, setSortOrder] = useState('terbaru');
 
-  // State Pagination untuk menangani 700+ baris data agar cepat
+  // State Pagination untuk 700+ baris data
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
 
   const [rawIn, setRawIn] = useState([]);
   const [rawOut, setRawOut] = useState([]);
   const [bendaharaOptions, setBendaharaOptions] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
 
   // Modal Edit State
   const [showEditModal, setShowEditModal] = useState(false);
@@ -64,11 +70,24 @@ export default function RiwayatTransaksi() {
       }
     });
 
+    // Listen Audit Log khusus Super Admin
+    let unsubLog = null;
+    if (isSuperAdmin) {
+      unsubLog = listenFirebase("riwayat_perubahan_cache", (logs) => {
+        if (Array.isArray(logs)) {
+          setAuditLogs(logs);
+        } else {
+          setAuditLogs([]);
+        }
+      });
+    }
+
     return () => {
       if (typeof unsubSet === 'function') unsubSet();
       if (typeof unsubDash === 'function') unsubDash();
+      if (typeof unsubLog === 'function') unsubLog();
     };
-  }, []);
+  }, [isSuperAdmin]);
 
   const formatRp = (val) => {
     if (!val && val !== 0) return 'Rp 0';
@@ -102,12 +121,38 @@ export default function RiwayatTransaksi() {
     return `${dayName}, ${dayDate} ${monthName} ${year}`;
   };
 
-  // SINKRONISASI DATA MANUAL DARI GOOGLE SPREADSHEET
+  // CATAT AUDIT LOG PERUBAHAN
+  const recordAuditLog = async (actionType, detailStr, oldVal, newVal) => {
+    try {
+      const existingLogs = (await getFromFirebase("riwayat_perubahan_cache")) || [];
+      const newLog = {
+        id: `LOG-${Date.now()}`,
+        timestamp: Date.now(),
+        waktu: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
+        aksi: actionType, // 'EDIT' | 'HAPUS'
+        detail: detailStr,
+        pengubah: 'Super Admin',
+        dataLama: oldVal || null,
+        dataBaru: newVal || null
+      };
+
+      const updatedLogs = [newLog, ...existingLogs];
+      await saveToFirebase("riwayat_perubahan_cache", updatedLogs);
+      
+      if (typeof syncMutationToSpreadsheet === 'function') {
+        syncMutationToSpreadsheet('catatLogPerubahan', newLog);
+      }
+    } catch (err) {
+      console.error("Gagal mencatat audit log:", err);
+    }
+  };
+
+  // SINKRONISASI DATA MANUAL DARI SPREADSHEET
   const handleSyncData = async () => {
     setLoadingSync(true);
     Swal.fire({
-      title: 'Menyinkronkan 700+ Data...',
-      text: 'Menarik seluruh baris transaksi terbaru dari Google Spreadsheet',
+      title: 'Menyinkronkan Data...',
+      text: 'Menarik data transaksi terbaru dari Google Spreadsheet',
       didOpen: () => Swal.showLoading()
     });
 
@@ -121,7 +166,7 @@ export default function RiwayatTransaksi() {
     }
   };
 
-  // GABUNGKAN & MEMOIZE SELURUH LOG TRANSAKSI MASUK & KELUAR
+  // GABUNGKAN & MEMOIZE TRANSAKSI MASUK & KELUAR
   const allTransactions = useMemo(() => {
     const list = [];
 
@@ -176,7 +221,7 @@ export default function RiwayatTransaksi() {
     return list;
   }, [rawIn, rawOut]);
 
-  // FILTERING & SORTING DATA 700+ BARIS
+  // FILTERING & SORTING DATA
   const filteredList = useMemo(() => {
     let result = allTransactions.filter((item) => {
       const searchLower = search.toLowerCase();
@@ -209,12 +254,10 @@ export default function RiwayatTransaksi() {
     return result;
   }, [allTransactions, search, filterJenis, filterBendahara, sortOrder]);
 
-  // RESET PAGE SAAT FILTER BERUBAH
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterJenis, filterBendahara, sortOrder, itemsPerPage]);
 
-  // METRIK RINGKASAN
   const totalRecords = filteredList.length;
   const totalPemasukanFiltered = useMemo(() => {
     return filteredList.filter(i => i.jenis === 'Pemasukan').reduce((acc, curr) => acc + curr.nominal, 0);
@@ -224,14 +267,13 @@ export default function RiwayatTransaksi() {
     return filteredList.filter(i => i.jenis === 'Pengeluaran').reduce((acc, curr) => acc + curr.nominal, 0);
   }, [filteredList]);
 
-  // PAGINASI ULTRACAPAT UNTUK 700+ BARIS
   const totalPages = Math.ceil(totalRecords / itemsPerPage) || 1;
   const paginatedData = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredList.slice(start, start + itemsPerPage);
   }, [filteredList, currentPage, itemsPerPage]);
 
-  // LOGIKA EDIT TRANSAKSI (SUPER ADMIN)
+  // BUKA MODAL EDIT
   const handleOpenEdit = (item) => {
     let dateVal = new Date().toISOString().split('T')[0];
     if (item.tglRaw && item.tglRaw !== '-') {
@@ -254,12 +296,14 @@ export default function RiwayatTransaksi() {
     setShowEditModal(true);
   };
 
+  // SIMPAN EDIT TRANSAKSI (MUTASI KE FIREBASE & GOOGLE SPREADSHEET REAL-TIME)
   const handleSaveEdit = async (e) => {
     e.preventDefault();
     setShowEditModal(false);
 
     Swal.fire({
       title: 'Menyimpan Perubahan...',
+      text: 'Mengubah data di Firebase dan Google Spreadsheet',
       didOpen: () => Swal.showLoading()
     });
 
@@ -271,6 +315,8 @@ export default function RiwayatTransaksi() {
         dashboardIn: [],
         dashboardOut: []
       };
+
+      const oldItem = allTransactions.find(t => t.id === editForm.id);
 
       let newFullIn = (currentDash.fullIn || []).filter(r => r[0] !== editForm.id);
       let newFullOut = (currentDash.fullOut || []).filter(r => r[0] !== editForm.id);
@@ -334,13 +380,29 @@ export default function RiwayatTransaksi() {
         herni, sari, dina
       };
 
+      // 1. Simpan ke Cache Firebase
       await saveToFirebase("dashboard_cache", currentDash);
+
+      // 2. KIKIR REAL-TIME MUTASI KE GOOGLE SPREADSHEET
+      if (typeof syncMutationToSpreadsheet === 'function') {
+        await syncMutationToSpreadsheet('editTransaksi', editForm);
+      } else {
+        await fetchAPI('editTransaksi', editForm);
+      }
+
+      // 3. Catat Audit Log
+      await recordAuditLog(
+        'EDIT',
+        `Mengubah transaksi [${editForm.id}] ${editForm.keperluan} (${formatRp(editForm.nominal)})`,
+        oldItem,
+        editForm
+      );
 
       Swal.fire({
         icon: 'success',
-        title: 'Transaksi Diperbarui!',
-        text: 'Data riwayat transaksi berhasil diubah.',
-        timer: 1500,
+        title: 'Berhasil Diperbarui!',
+        text: 'Data riwayat transaksi telah ter-update di Firebase dan Google Spreadsheet.',
+        timer: 1800,
         showConfirmButton: false
       });
     } catch (err) {
@@ -348,11 +410,11 @@ export default function RiwayatTransaksi() {
     }
   };
 
-  // LOGIKA HAPUS TRANSAKSI (SUPER ADMIN)
+  // HAPUS TRANSAKSI (MUTASI KE FIREBASE & GOOGLE SPREADSHEET REAL-TIME)
   const handleDeleteTransaction = async (item) => {
     const confirm = await Swal.fire({
       title: 'Hapus Transaksi Ini?',
-      text: `Yakin ingin menghapus ${item.jenis} "${item.keperluan}" sebesar ${formatRp(item.nominal)}?`,
+      text: `Yakin ingin menghapus ${item.jenis} "${item.keperluan}" sebesar ${formatRp(item.nominal)}? Data akan terhapus permanen dari Spreadsheet.`,
       icon: 'warning',
       showCancelButton: true,
       confirmButtonText: 'Ya, Hapus Permanen',
@@ -363,6 +425,7 @@ export default function RiwayatTransaksi() {
     if (confirm.isConfirmed) {
       Swal.fire({
         title: 'Menghapus Transaksi...',
+        text: 'Menghapus dari Firebase & Google Spreadsheet',
         didOpen: () => Swal.showLoading()
       });
 
@@ -412,9 +475,25 @@ export default function RiwayatTransaksi() {
           herni, sari, dina
         };
 
+        // 1. Simpan ke Cache Firebase
         await saveToFirebase("dashboard_cache", currentDash);
 
-        Swal.fire('Terhapus!', 'Transaksi telah dihapus dari sistem.', 'success');
+        // 2. HAPUS REAL-TIME DI GOOGLE SPREADSHEET
+        if (typeof syncMutationToSpreadsheet === 'function') {
+          await syncMutationToSpreadsheet('hapusTransaksi', { id: item.id, jenis: item.jenis });
+        } else {
+          await fetchAPI('hapusTransaksi', { id: item.id, jenis: item.jenis });
+        }
+
+        // 3. Catat Audit Log
+        await recordAuditLog(
+          'HAPUS',
+          `Menghapus transaksi [${item.id}] ${item.keperluan} (${formatRp(item.nominal)})`,
+          item,
+          null
+        );
+
+        Swal.fire('Terhapus!', 'Transaksi telah dihapus dari Firebase dan Spreadsheet.', 'success');
       } catch (err) {
         Swal.fire('Gagal Hapus', err.message || 'Terjadi kesalahan sistem.', 'error');
       }
@@ -477,230 +556,327 @@ export default function RiwayatTransaksi() {
         </div>
       </div>
 
-      {/* METRIC SUMMARY CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-black">
-            <Wallet className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">TOTAL RECORD DITEMUKAN</span>
-            <div className="text-2xl font-black text-gray-800">{totalRecords} <span className="text-xs font-normal text-gray-400">Transaksi</span></div>
-          </div>
+      {/* SUB MENU UNTUK SUPER ADMIN */}
+      {isSuperAdmin && (
+        <div className="flex border-b border-gray-200 bg-white rounded-2xl p-1.5 shadow-sm border">
+          <button
+            onClick={() => setActiveTab('transaksi')}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition cursor-pointer ${
+              activeTab === 'transaksi'
+                ? 'bg-green-700 text-white shadow-md'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+            }`}
+          >
+            <History className="w-4 h-4" /> Daftar Transaksi Kas
+          </button>
+
+          <button
+            onClick={() => setActiveTab('log_perubahan')}
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black transition cursor-pointer ${
+              activeTab === 'log_perubahan'
+                ? 'bg-purple-700 text-white shadow-md'
+                : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'
+            }`}
+          >
+            <Activity className="w-4 h-4 text-amber-300" /> Riwayat Perubahan (Super Admin)
+            <span className="bg-amber-400 text-gray-900 px-2 py-0.5 rounded-full text-[10px] font-black">
+              {auditLogs.length}
+            </span>
+          </button>
         </div>
+      )}
 
-        <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center font-black">
-            <ArrowDownToLine className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">TOTAL PEMASUKAN FILTERED</span>
-            <div className="text-xl font-black text-green-700">{formatRp(totalPemasukanFiltered)}</div>
-          </div>
-        </div>
+      {/* TAB 1: DAFTAR TRANSAKSI KAS */}
+      {activeTab === 'transaksi' && (
+        <>
+          {/* METRIC SUMMARY CARDS */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-black">
+                <Wallet className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">TOTAL RECORD DITEMUKAN</span>
+                <div className="text-2xl font-black text-gray-800">{totalRecords} <span className="text-xs font-normal text-gray-400">Transaksi</span></div>
+              </div>
+            </div>
 
-        <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center font-black">
-            <ArrowUpFromLine className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">TOTAL PENGELUARAN FILTERED</span>
-            <div className="text-xl font-black text-red-600">{formatRp(totalPengeluaranFiltered)}</div>
-          </div>
-        </div>
-      </div>
+            <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 bg-green-50 text-green-600 rounded-2xl flex items-center justify-center font-black">
+                <ArrowDownToLine className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">TOTAL PEMASUKAN FILTERED</span>
+                <div className="text-xl font-black text-green-700">{formatRp(totalPemasukanFiltered)}</div>
+              </div>
+            </div>
 
-      {/* CONTROL & FILTER PANEL */}
-      <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm space-y-3">
-        <div className="flex flex-col lg:flex-row gap-3">
-          {/* SEARCH BAR */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3" />
-            <input
-              type="text"
-              placeholder="Cari ID, Kategori, atau Keperluan Barang..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-gray-50 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-600 font-medium"
-            />
+            <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center font-black">
+                <ArrowUpFromLine className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">TOTAL PENGELUARAN FILTERED</span>
+                <div className="text-xl font-black text-red-600">{formatRp(totalPengeluaranFiltered)}</div>
+              </div>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* FILTER JENIS */}
-            <div className="flex bg-gray-100 p-1 rounded-xl text-xs font-bold">
-              {['Semua', 'Pemasukan', 'Pengeluaran'].map((j) => (
-                <button
-                  key={j}
-                  onClick={() => setFilterJenis(j)}
-                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                    filterJenis === j ? 'bg-white text-gray-800 shadow-sm font-black' : 'text-gray-500'
-                  }`}
+          {/* CONTROL & FILTER PANEL */}
+          <div className="bg-white p-4 rounded-3xl border border-gray-100 shadow-sm space-y-3">
+            <div className="flex flex-col lg:flex-row gap-3">
+              {/* SEARCH BAR */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3" />
+                <input
+                  type="text"
+                  placeholder="Cari ID, Kategori, atau Keperluan Barang..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-gray-50 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-green-600 font-medium"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* FILTER JENIS */}
+                <div className="flex bg-gray-100 p-1 rounded-xl text-xs font-bold">
+                  {['Semua', 'Pemasukan', 'Pengeluaran'].map((j) => (
+                    <button
+                      key={j}
+                      onClick={() => setFilterJenis(j)}
+                      className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                        filterJenis === j ? 'bg-white text-gray-800 shadow-sm font-black' : 'text-gray-500'
+                      }`}
+                    >
+                      {j}
+                    </button>
+                  ))}
+                </div>
+
+                {/* FILTER BENDAHARA */}
+                <select
+                  value={filterBendahara}
+                  onChange={(e) => setFilterBendahara(e.target.value)}
+                  className="px-3 py-2 bg-gray-50 border rounded-xl text-xs font-bold text-gray-700 outline-none focus:ring-2 focus:ring-green-600 cursor-pointer"
                 >
-                  {j}
-                </button>
-              ))}
-            </div>
+                  <option value="Semua">Semua Bendahara</option>
+                  {bendaharaOptions.map((b) => (
+                    <option key={b.id} value={b.nama}>{b.nama}</option>
+                  ))}
+                </select>
 
-            {/* FILTER BENDAHARA */}
-            <select
-              value={filterBendahara}
-              onChange={(e) => setFilterBendahara(e.target.value)}
-              className="px-3 py-2 bg-gray-50 border rounded-xl text-xs font-bold text-gray-700 outline-none focus:ring-2 focus:ring-green-600 cursor-pointer"
-            >
-              <option value="Semua">Semua Bendahara</option>
-              {bendaharaOptions.map((b) => (
-                <option key={b.id} value={b.nama}>{b.nama}</option>
-              ))}
-            </select>
-
-            {/* FILTER URUTAN (SORT ORDER) */}
-            <div className="flex items-center gap-1.5 bg-green-50/80 border border-green-200 px-3 py-1.5 rounded-xl text-xs font-bold text-green-900">
-              <ArrowUpDown className="w-3.5 h-3.5 text-green-700" />
-              <span>Urutan:</span>
-              <select
-                value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value)}
-                className="bg-transparent font-black outline-none cursor-pointer text-green-900"
-              >
-                <option value="terbaru">Terbaru → Terlama (Default)</option>
-                <option value="terlama">Terlama → Terbaru</option>
-                <option value="nominal_terbesar">Nominal Terbesar</option>
-                <option value="nominal_terkecil">Nominal Terkecil</option>
-              </select>
+                {/* FILTER URUTAN (SORT ORDER) */}
+                <div className="flex items-center gap-1.5 bg-green-50/80 border border-green-200 px-3 py-1.5 rounded-xl text-xs font-bold text-green-900">
+                  <ArrowUpDown className="w-3.5 h-3.5 text-green-700" />
+                  <span>Urutan:</span>
+                  <select
+                    value={sortOrder}
+                    onChange={(e) => setSortOrder(e.target.value)}
+                    className="bg-transparent font-black outline-none cursor-pointer text-green-900"
+                  >
+                    <option value="terbaru">Terbaru → Terlama (Default)</option>
+                    <option value="terlama">Terlama → Terbaru</option>
+                    <option value="nominal_terbesar">Nominal Terbesar</option>
+                    <option value="nominal_terkecil">Nominal Terkecil</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* TABEL DATA RIWAYAT TRANSAKSI */}
-      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-green-50/50 text-green-900 border-b font-extrabold uppercase tracking-wider">
-                <th className="p-4">Hari & Tanggal</th>
-                <th className="p-4">Jenis</th>
-                <th className="p-4">Kategori</th>
-                <th className="p-4">Keperluan / Nama Barang</th>
-                <th className="p-4">Bendahara</th>
-                <th className="p-4 text-right">Nominal (Rp)</th>
-                {isSuperAdmin && <th className="p-4 text-center">Aksi Super Admin</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {paginatedData.length === 0 ? (
-                <tr>
-                  <td colSpan={isSuperAdmin ? 7 : 6} className="text-center py-12 text-gray-400 font-medium">
-                    Tidak ditemukan data riwayat transaksi yang sesuai.
-                  </td>
-                </tr>
-              ) : (
-                paginatedData.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50/80 transition-colors">
-                    <td className="p-4 font-extrabold text-gray-700 whitespace-nowrap">
-                      {item.tglDisplay}
-                    </td>
-
-                    <td className="p-4">
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
-                        item.jenis === 'Pemasukan'
-                          ? 'bg-green-100 text-green-700 border border-green-200'
-                          : 'bg-red-100 text-red-600 border border-red-200'
-                      }`}>
-                        {item.jenis}
-                      </span>
-                    </td>
-
-                    <td className="p-4 font-black text-gray-800 uppercase">
-                      {item.kategori}
-                    </td>
-
-                    <td className="p-4 font-medium text-gray-700">
-                      {item.keperluan}
-                    </td>
-
-                    <td className="p-4 font-bold text-gray-800">
-                      {item.bendahara}
-                    </td>
-
-                    <td className={`p-4 text-right font-black ${
-                      item.jenis === 'Pemasukan' ? 'text-green-700' : 'text-red-600'
-                    }`}>
-                      {formatRp(item.nominal)}
-                    </td>
-
-                    {/* AKSI SUPER ADMIN (EDIT & HAPUS) */}
-                    {isSuperAdmin && (
-                      <td className="p-4 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => handleOpenEdit(item)}
-                            className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition cursor-pointer"
-                            title="Edit Transaksi"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteTransaction(item)}
-                            className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition cursor-pointer"
-                            title="Hapus Transaksi"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    )}
+          {/* TABEL DATA RIWAYAT TRANSAKSI */}
+          <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-green-50/50 text-green-900 border-b font-extrabold uppercase tracking-wider">
+                    <th className="p-4">Hari & Tanggal</th>
+                    <th className="p-4">Jenis</th>
+                    <th className="p-4">Kategori</th>
+                    <th className="p-4">Keperluan / Nama Barang</th>
+                    <th className="p-4">Bendahara</th>
+                    <th className="p-4 text-right">Nominal (Rp)</th>
+                    {isSuperAdmin && <th className="p-4 text-center">Aksi Super Admin</th>}
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {paginatedData.length === 0 ? (
+                    <tr>
+                      <td colSpan={isSuperAdmin ? 7 : 6} className="text-center py-12 text-gray-400 font-medium">
+                        Tidak ditemukan data riwayat transaksi yang sesuai.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedData.map((item) => (
+                      <tr key={item.id} className="hover:bg-gray-50/80 transition-colors">
+                        <td className="p-4 font-extrabold text-gray-700 whitespace-nowrap">
+                          {item.tglDisplay}
+                        </td>
 
-        {/* BAR PAGINASI NAVIGASI UNTUK 700+ DATA */}
-        {totalRecords > 0 && (
-          <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs font-bold text-gray-600">
-            <div className="flex items-center gap-2">
-              <span>Tampilkan per halaman:</span>
-              <select
-                value={itemsPerPage}
-                onChange={(e) => setItemsPerPage(Number(e.target.value))}
-                className="bg-white border rounded-lg px-2 py-1 outline-none font-bold cursor-pointer"
-              >
-                <option value={25}>25 Baris</option>
-                <option value={50}>50 Baris</option>
-                <option value={100}>100 Baris</option>
-                <option value={200}>200 Baris</option>
-              </select>
-              <span className="text-gray-400 font-normal">
-                (Menampilkan {Math.min((currentPage - 1) * itemsPerPage + 1, totalRecords)} - {Math.min(currentPage * itemsPerPage, totalRecords)} dari {totalRecords} total transaksi)
-              </span>
+                        <td className="p-4">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                            item.jenis === 'Pemasukan'
+                              ? 'bg-green-100 text-green-700 border border-green-200'
+                              : 'bg-red-100 text-red-600 border border-red-200'
+                          }`}>
+                            {item.jenis}
+                          </span>
+                        </td>
+
+                        <td className="p-4 font-black text-gray-800 uppercase">
+                          {item.kategori}
+                        </td>
+
+                        <td className="p-4 font-medium text-gray-700">
+                          {item.keperluan}
+                        </td>
+
+                        <td className="p-4 font-bold text-gray-800">
+                          {item.bendahara}
+                        </td>
+
+                        <td className={`p-4 text-right font-black ${
+                          item.jenis === 'Pemasukan' ? 'text-green-700' : 'text-red-600'
+                        }`}>
+                          {formatRp(item.nominal)}
+                        </td>
+
+                        {/* AKSI SUPER ADMIN (EDIT & HAPUS) */}
+                        {isSuperAdmin && (
+                          <td className="p-4 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => handleOpenEdit(item)}
+                                className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition cursor-pointer"
+                                title="Edit Transaksi"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteTransaction(item)}
+                                className="p-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition cursor-pointer"
+                                title="Hapus Transaksi"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
 
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                disabled={currentPage === 1}
-                className="p-2 bg-white border rounded-xl hover:bg-gray-100 transition disabled:opacity-40 cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              
-              <span className="px-3 py-1 bg-green-700 text-white rounded-xl font-extrabold">
-                Halaman {currentPage} dari {totalPages}
-              </span>
+            {/* BAR PAGINASI NAVIGASI UNTUK 700+ DATA */}
+            {totalRecords > 0 && (
+              <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs font-bold text-gray-600">
+                <div className="flex items-center gap-2">
+                  <span>Tampilkan per halaman:</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                    className="bg-white border rounded-lg px-2 py-1 outline-none font-bold cursor-pointer"
+                  >
+                    <option value={25}>25 Baris</option>
+                    <option value={50}>50 Baris</option>
+                    <option value={100}>100 Baris</option>
+                    <option value={200}>200 Baris</option>
+                  </select>
+                  <span className="text-gray-400 font-normal">
+                    (Menampilkan {Math.min((currentPage - 1) * itemsPerPage + 1, totalRecords)} - {Math.min(currentPage * itemsPerPage, totalRecords)} dari {totalRecords} total transaksi)
+                  </span>
+                </div>
 
-              <button
-                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                disabled={currentPage === totalPages}
-                className="p-2 bg-white border rounded-xl hover:bg-gray-100 transition disabled:opacity-40 cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                    className="p-2 bg-white border rounded-xl hover:bg-gray-100 transition disabled:opacity-40 cursor-pointer"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  
+                  <span className="px-3 py-1 bg-green-700 text-white rounded-xl font-extrabold">
+                    Halaman {currentPage} dari {totalPages}
+                  </span>
+
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                    className="p-2 bg-white border rounded-xl hover:bg-gray-100 transition disabled:opacity-40 cursor-pointer"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
+
+      {/* TAB 2: RIWAYAT PERUBAHAN (KHUSUS SUPER ADMIN) */}
+      {activeTab === 'log_perubahan' && isSuperAdmin && (
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden space-y-4 p-5">
+          <div className="flex items-center justify-between border-b pb-4">
+            <div>
+              <h2 className="text-lg font-black text-gray-800 flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-purple-700" /> Audit Log Riwayat Perubahan Data
+              </h2>
+              <p className="text-gray-500 text-xs">Jurnal aktivitas pengubahan (Edit) dan penghapusan (Delete) data transaksi oleh Super Admin.</p>
+            </div>
+            <span className="px-3 py-1 rounded-full text-xs font-black bg-purple-100 text-purple-800 border border-purple-200">
+              {auditLogs.length} Aktivitas
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-purple-50 text-purple-900 border-b font-extrabold uppercase tracking-wider">
+                  <th className="p-3.5">Waktu Akses</th>
+                  <th className="p-3.5">Aksi</th>
+                  <th className="p-3.5">Detail Perubahan</th>
+                  <th className="p-3.5">Pengubah</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {auditLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" className="text-center py-12 text-gray-400 font-medium">
+                      Belum ada catatan aktivitas perubahan data.
+                    </td>
+                  </tr>
+                ) : (
+                  auditLogs.map((log) => (
+                    <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="p-3.5 font-bold text-gray-600 whitespace-nowrap flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-gray-400" /> {log.waktu || formatDateIndo(log.timestamp)}
+                      </td>
+                      <td className="p-3.5">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                          log.aksi === 'EDIT'
+                            ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                            : 'bg-red-100 text-red-700 border border-red-200'
+                        }`}>
+                          {log.aksi}
+                        </span>
+                      </td>
+                      <td className="p-3.5 font-bold text-gray-800">
+                        {log.detail}
+                      </td>
+                      <td className="p-3.5 font-extrabold text-purple-700">
+                        {log.pengubah || 'Super Admin'}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* MODAL EDIT TRANSAKSI (SUPER ADMIN) */}
       {showEditModal && isSuperAdmin && (
